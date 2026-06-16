@@ -1,14 +1,14 @@
 import { useCallback } from 'react';
 import { useAppStore } from '@/store/appStore';
 import { useProcessStore } from '@/store/processStore';
-import { processImageFile, validateImage, groupImagesByProduct, addMissingAngleIssues, refineImageType, generateSequentialNames } from '@/services/imageService';
+import { processImageFile, validateImage, groupImagesByProduct, addMissingAngleIssues, refineImageType, generateSequentialNames, buildProductSnapshots } from '@/services/imageService';
 import { selectFiles, selectFolder, FileWithPath, convertToImageRecord } from '@/services/fileService';
 import { exportResults } from '@/services/exportService';
-import type { ImageItem } from '@/types';
+import type { ImageItem, TimelineEvent } from '@/types';
 import { generateId } from '@/utils/formatters';
 
 export function useImageProcessor() {
-  const { selectedPlatformId, customSkuPattern, exportConfig, getPlatformRule, addProcessRecord, updateProcessRecord } = useAppStore();
+  const { selectedPlatformId, customSkuPattern, exportConfig, getPlatformRule, addProcessRecord, updateProcessRecord, appendTimelineEvent } = useAppStore();
   const {
     currentBatch,
     isProcessing,
@@ -151,6 +151,15 @@ export function useImageProcessor() {
       setProgress(100, '导出完成');
 
       if (result) {
+        const snapshots = buildProductSnapshots(currentBatch.images, currentBatch.productGroups);
+        const exportEvent: TimelineEvent = {
+          id: generateId(),
+          timestamp: Date.now(),
+          type: 'export',
+          label: '导出完成',
+          description: `生成 ${result.filename}（${result.uploadCount + result.compressedCount + (exportConfig.generateIssueReport ? 2 : 0) + (exportConfig.generateReviewList ? 1 : 0) + 1} 个文件）`,
+          snapshots,
+        };
         updateProcessRecord(currentBatch.id, {
           exportContent: {
             uploadFileCount: result.uploadCount,
@@ -159,7 +168,14 @@ export function useImageProcessor() {
             reviewFileCount: result.reviewCount,
           },
           reportPath: result.filename,
+          exportSnapshot: {
+            timestamp: Date.now(),
+            filename: result.filename,
+            config: { ...exportConfig },
+            items: result.items,
+          },
         });
+        appendTimelineEvent(currentBatch.id, exportEvent);
       }
     } catch (error) {
       console.error('导出失败:', error);

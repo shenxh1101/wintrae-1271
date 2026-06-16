@@ -9,6 +9,7 @@ import { IssueSummary } from '@/components/processor/IssueSummary';
 import { ProductGroups } from '@/components/processor/ProductGroups';
 import { ImageCard } from '@/components/processor/ImageCard';
 import { ExportPreviewModal } from '@/components/processor/ExportPreviewModal';
+import { ScanLogPanel } from '@/components/processor/ScanLogPanel';
 import { useImageProcessor } from '@/hooks/useImageProcessor';
 import { useProcessStore } from '@/store/processStore';
 import { useAppStore } from '@/store/appStore';
@@ -221,6 +222,8 @@ export default function ImageProcessor() {
             )}
 
             <IssueSummary />
+
+            <ScanLogPanel visible={isWatching} />
 
             {filteredImages.length > 0 ? (
               <div className="grid grid-cols-4 gap-4">

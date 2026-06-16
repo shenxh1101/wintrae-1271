@@ -1,4 +1,5 @@
-import type { ImageRecord } from '@/types';
+import type { ImageRecord, ScanLog } from '@/types';
+import { generateId } from '@/utils/formatters';
 
 declare global {
   interface Window {
@@ -15,6 +16,8 @@ const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.ti
 
 let savedDirectoryHandle: any = null;
 const knownFilePaths = new Set<string>();
+const scanLogs: ScanLog[] = [];
+const MAX_SCAN_LOGS = 50;
 
 export function getKnownFilePaths(): Set<string> {
   return knownFilePaths;
@@ -30,6 +33,27 @@ export function addKnownFilePaths(paths: string[]): void {
 
 export function clearKnownFilePaths(): void {
   knownFilePaths.clear();
+}
+
+export function addScanLog(log: Omit<ScanLog, 'id' | 'timestamp'>): ScanLog {
+  const entry: ScanLog = {
+    id: generateId(),
+    timestamp: Date.now(),
+    ...log,
+  };
+  scanLogs.unshift(entry);
+  if (scanLogs.length > MAX_SCAN_LOGS) {
+    scanLogs.length = MAX_SCAN_LOGS;
+  }
+  return entry;
+}
+
+export function getScanLogs(): ScanLog[] {
+  return [...scanLogs];
+}
+
+export function clearScanLogs(): void {
+  scanLogs.length = 0;
 }
 
 function isImageFile(filename: string): boolean {

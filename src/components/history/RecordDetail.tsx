@@ -4,9 +4,9 @@ import { Badge } from '@/components/common/Badge';
 import { Button } from '@/components/common/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/common/Card';
 import {
-  FolderOpen, Clock, AlertTriangle, CheckCircle, FileText, Package, FolderKanban, Image, Search, ChevronDown, ChevronRight, ChevronUp,
+  FolderOpen, Clock, AlertTriangle, CheckCircle, FileText, Package, FolderKanban, Image, Search, ChevronDown, ChevronRight, ChevronUp, FolderTree, Image as ImageIcon,
 } from 'lucide-react';
-import type { ProcessRecord, ImageRecord, ProductGroup } from '@/types';
+import type { ProcessRecord, ImageRecord, ProductGroup, ExportedFileItem } from '@/types';
 import {
   formatDate, formatDuration, formatNumber, formatFileSize
 } from '@/utils/formatters';
@@ -21,13 +21,15 @@ interface RecordDetailProps {
   record: ProcessRecord | null;
 }
 
-type TabType = 'overview' | 'images' | 'issues' | 'groups' | 'exports';
+type TabType = 'overview' | 'images' | 'issues' | 'groups' | 'exports' | 'timeline';
 
 export const RecordDetail = ({ isOpen, onClose, record }: RecordDetailProps) => {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [issueFilter, setIssueFilter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [expandedExportCategory, setExpandedExportCategory] = useState<string | null>('upload');
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
 
   const issueStats = useMemo(() => {
@@ -75,6 +77,7 @@ export const RecordDetail = ({ isOpen, onClose, record }: RecordDetailProps) => 
     { key: 'issues', label: `问题明细 (${issueStats.total})`, icon: AlertTriangle },
     { key: 'groups', label: `商品分组 (${record.groups?.length || 0})`, icon: FolderKanban },
     { key: 'exports', label: '导出文件', icon: Package },
+    { key: 'timeline', label: `复盘时间线 (${record.timeline?.length || 0})`, icon: Clock },
   ];
 
   const filteredImages = (record.images || []).filter(
@@ -648,37 +651,341 @@ export const RecordDetail = ({ isOpen, onClose, record }: RecordDetailProps) => 
                     </div>
                   )}
                   {record.exportContent && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <p className="text-xs text-gray-500">待上传文件夹</p>
-                        <p className="text-lg font-bold text-gray-900 mt-1">
-                          {formatNumber(record.exportContent.uploadFileCount)}
-                        </p>
-                        <p className="text-xs text-gray-400">张图片</p>
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                          <p className="text-xs text-gray-500">待上传文件夹</p>
+                          <p className="text-lg font-bold text-gray-900 mt-1">
+                            {formatNumber(record.exportContent.uploadFileCount)}
+                          </p>
+                          <p className="text-xs text-gray-400">张图片</p>
+                        </div>
+                        <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                          <p className="text-xs text-gray-500">压缩副本</p>
+                          <p className="text-lg font-bold text-gray-900 mt-1">
+                            {formatNumber(record.exportContent.compressedFileCount)}
+                          </p>
+                          <p className="text-xs text-gray-400">张图片</p>
+                        </div>
+                        <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                          <p className="text-xs text-gray-500">问题报告条目</p>
+                          <p className="text-lg font-bold text-gray-900 mt-1">
+                            {formatNumber(record.exportContent.issueFileCount)}
+                          </p>
+                          <p className="text-xs text-gray-400">条记录</p>
+                        </div>
+                        <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                          <p className="text-xs text-gray-500">人工复核列表</p>
+                          <p className="text-lg font-bold text-gray-900 mt-1">
+                            {formatNumber(record.exportContent.reviewFileCount)}
+                          </p>
+                          <p className="text-xs text-gray-400">张需复核</p>
+                        </div>
                       </div>
-                      <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <p className="text-xs text-gray-500">压缩副本</p>
-                        <p className="text-lg font-bold text-gray-900 mt-1">
-                          {formatNumber(record.exportContent.compressedFileCount)}
-                        </p>
-                        <p className="text-xs text-gray-400">张图片</p>
-                      </div>
-                      <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <p className="text-xs text-gray-500">问题报告条目</p>
-                        <p className="text-lg font-bold text-gray-900 mt-1">
-                          {formatNumber(record.exportContent.issueFileCount)}
-                        </p>
-                        <p className="text-xs text-gray-400">条记录</p>
-                      </div>
-                      <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <p className="text-xs text-gray-500">人工复核列表</p>
-                        <p className="text-lg font-bold text-gray-900 mt-1">
-                          {formatNumber(record.exportContent.reviewFileCount)}
-                        </p>
-                        <p className="text-xs text-gray-400">张需复核</p>
-                      </div>
+
+                      {record.exportSnapshot && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between pt-2">
+                            <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                              <FolderTree className="w-4 h-4 text-blue-600" />
+                              <span>实际导出文件清单</span>
+                            </div>
+                            <span className="text-xs text-gray-500">
+                              共 {formatNumber(record.exportSnapshot.items.length)} 个文件 ·{' '}
+                              {formatDate(record.exportSnapshot.timestamp)}
+                            </span>
+                          </div>
+
+                          {(
+                            [
+                              { key: 'upload', label: '待上传', icon: FolderOpen },
+                              { key: 'compressed', label: '压缩副本', icon: Package },
+                              { key: 'issue', label: '问题报告', icon: FileText },
+                              { key: 'review', label: '人工复核', icon: AlertTriangle },
+                              { key: 'summary', label: '处理总结', icon: FileText },
+                            ] as { key: ExportedFileItem['category']; label: string; icon: any }[]
+                          ).map((cat) => {
+                            const catItems = record.exportSnapshot!.items.filter((i) => i.category === cat.key);
+                            if (catItems.length === 0) {
+                              return (
+                                <div key={cat.key} className="p-2 rounded-lg border border-gray-200 bg-gray-50 opacity-60">
+                                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                                    <cat.icon className="w-4 h-4" />
+                                    <span>{cat.label}</span>
+                                    <Badge variant="gray">未启用</Badge>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            const isExpanded = expandedExportCategory === cat.key;
+                            const excludedCount = catItems.filter((i) => i.excluded).length;
+
+                            return (
+                              <div key={cat.key} className="border border-gray-200 rounded-lg overflow-hidden">
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedExportCategory(isExpanded ? null : cat.key)}
+                                  className="w-full p-2 bg-gray-50 hover:bg-gray-100 transition-colors flex items-center justify-between text-left"
+                                >
+                                  <div className="flex items-center gap-2 text-sm">
+                                    {isExpanded ? (
+                                      <ChevronDown className="w-4 h-4 text-gray-500" />
+                                    ) : (
+                                      <ChevronRight className="w-4 h-4 text-gray-500" />
+                                    )}
+                                    <cat.icon className="w-4 h-4 text-blue-600" />
+                                    <span className="font-medium text-gray-800">{cat.label}</span>
+                                    <Badge variant="info">{formatNumber(catItems.length)} 个文件</Badge>
+                                    {excludedCount > 0 && (
+                                      <Badge variant="danger">{formatNumber(excludedCount)} 个被排除</Badge>
+                                    )}
+                                  </div>
+                                </button>
+
+                                {isExpanded && (
+                                  <div className="p-2 bg-white border-t border-gray-100 max-h-60 overflow-y-auto space-y-1">
+                                    {cat.key === 'upload' || cat.key === 'compressed' ? (
+                                      (() => {
+                                        const grouped: Record<string, ExportedFileItem[]> = {};
+                                        for (const it of catItems) {
+                                          const code = it.productCode || '(未分类)';
+                                          if (!grouped[code]) grouped[code] = [];
+                                          grouped[code].push(it);
+                                        }
+                                        return Object.entries(grouped).map(([code, imgs]) => (
+                                          <div key={code} className="border border-gray-100 rounded">
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setExpandedGroup(
+                                                  expandedGroup === `${cat.key}:${code}` ? null : `${cat.key}:${code}`,
+                                                )
+                                              }
+                                              className="w-full p-1.5 flex items-center gap-2 hover:bg-gray-50 text-left"
+                                            >
+                                              {expandedGroup === `${cat.key}:${code}` ? (
+                                                <ChevronDown className="w-3 h-3 text-gray-500" />
+                                              ) : (
+                                                <ChevronRight className="w-3 h-3 text-gray-500" />
+                                              )}
+                                              <span className="font-mono text-xs font-semibold text-blue-700">{code}</span>
+                                              <Badge variant="gray">{formatNumber(imgs.length)} 张</Badge>
+                                            </button>
+
+                                            {expandedGroup === `${cat.key}:${code}` && (
+                                              <div className="px-1.5 pb-1.5 space-y-0.5 border-t border-gray-100 pt-1">
+                                                {imgs.map((img, idx) => (
+                                                  <div
+                                                    key={idx}
+                                                    className={cn(
+                                                      'flex items-center gap-2 p-1 rounded text-xs',
+                                                      img.excluded ? 'bg-red-50' : 'bg-gray-50',
+                                                    )}
+                                                  >
+                                                    <ImageIcon className={cn('w-3.5 h-3.5 flex-shrink-0', img.excluded ? 'text-red-400' : 'text-blue-400')} />
+                                                    <span className="font-mono text-gray-800 flex-1 truncate">{img.fileName}</span>
+                                                    {img.angle && <Badge variant="gray">{img.angle}</Badge>}
+                                                    {img.fileSize != null && (
+                                                      <span className="text-gray-500 whitespace-nowrap">
+                                                        {img.fileSize < 1024 * 1024
+                                                          ? `${Math.round(img.fileSize / 1024)} KB`
+                                                          : `${(img.fileSize / 1024 / 1024).toFixed(1)} MB`}
+                                                      </span>
+                                                    )}
+                                                    {img.excluded && (
+                                                      <Badge variant="danger">{img.excludedReason}</Badge>
+                                                    )}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        ));
+                                      })()
+                                    ) : (
+                                      catItems.map((item, idx) => (
+                                        <div key={idx} className="flex items-center gap-2 p-1.5 bg-gray-50 rounded text-xs">
+                                          <FileText className="w-3.5 h-3.5 text-gray-500" />
+                                          <span className="font-mono text-gray-800">{item.fileName}</span>
+                                          {item.fileSize != null && (
+                                            <span className="text-gray-500 ml-auto whitespace-nowrap">
+                                              {item.fileSize < 1024 * 1024
+                                                ? `${Math.round(item.fileSize / 1024)} KB`
+                                                : `${(item.fileSize / 1024 / 1024).toFixed(1)} MB`}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ))
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'timeline' && (
+            <div className="space-y-3">
+              {!record.timeline || record.timeline.length === 0 ? (
+                <div className="p-12 text-center text-gray-400 text-sm border border-dashed rounded-lg">
+                  <Clock className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                  暂无复盘记录
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">按商品筛选：</span>
+                      <input
+                        type="text"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="输入商品编码..."
+                        className="px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="relative pl-6 space-y-3">
+                    <div className="absolute left-2 top-1 bottom-1 w-0.5 bg-gray-200" />
+                    {record.timeline.map((ev) => {
+                      const isInitial = ev.type === 'initial';
+                      const isAppend = ev.type === 'append';
+                      const isExport = ev.type === 'export';
+                      const dotColor = isInitial ? 'bg-blue-500' : isAppend ? 'bg-emerald-500' : 'bg-purple-500';
+                      const borderColor = isInitial ? 'border-blue-200 bg-blue-50/40' : isAppend ? 'border-emerald-200 bg-emerald-50/40' : 'border-purple-200 bg-purple-50/40';
+                      const iconBadge = isInitial ? '🔵' : isAppend ? '➕' : '📦';
+
+                      const relevantSnapshots = ev.snapshots.filter((s) =>
+                        !searchTerm.trim() || s.productCode.toLowerCase().includes(searchTerm.toLowerCase()),
+                      );
+
+                      return (
+                        <div key={ev.id} className="relative">
+                          <div className={cn('absolute -left-[22px] top-3 w-4 h-4 rounded-full border-2 border-white', dotColor)} />
+                          <div className={cn('border rounded-lg overflow-hidden', borderColor)}>
+                            <div className="p-2.5 flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-base">{iconBadge}</span>
+                                <div>
+                                  <p className="text-sm font-semibold text-gray-900">{ev.label}</p>
+                                  {ev.description && (
+                                    <p className="text-xs text-gray-500 mt-0.5">{ev.description}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <span className="text-xs text-gray-500 whitespace-nowrap">
+                                {formatDate(ev.timestamp)}
+                              </span>
+                            </div>
+
+                            {relevantSnapshots.length > 0 && (
+                              <div className="px-2.5 pb-2.5 space-y-1 border-t border-gray-200 pt-2 max-h-56 overflow-y-auto">
+                                {relevantSnapshots.map((snap) => {
+                                  const prev = record.timeline!
+                                    .slice(0, record.timeline!.indexOf(ev))
+                                    .reverse()
+                                    .find((e) => e.snapshots.some((ss) => ss.productCode === snap.productCode));
+                                  const prevSnap = prev?.snapshots.find((ss) => ss.productCode === snap.productCode);
+                                  const newlyCovered: string[] = [];
+                                  const newlyResolved: string[] = [];
+                                  if (prevSnap) {
+                                    for (const a of snap.angles) {
+                                      if (!prevSnap.angles.includes(a)) newlyCovered.push(a);
+                                    }
+                                    for (const m of prevSnap.missingAngles) {
+                                      if (!snap.missingAngles.includes(m)) newlyResolved.push(m);
+                                    }
+                                  }
+
+                                  return (
+                                    <div key={snap.productCode} className="bg-white rounded border border-gray-200 p-2">
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-mono text-xs font-semibold text-blue-700">
+                                          {snap.productCode}
+                                        </span>
+                                        <div className="flex items-center gap-1.5">
+                                          <Badge variant="gray">{formatNumber(snap.imageCount)} 张图</Badge>
+                                          {snap.missingAngles.length > 0 ? (
+                                            <Badge variant="danger">缺 {snap.missingAngles.length} 个角度</Badge>
+                                          ) : (
+                                            <Badge variant="success">套图完整</Badge>
+                                          )}
+                                          {snap.issueCount > 0 && (
+                                            <Badge variant="warning">{formatNumber(snap.issueCount)} 个问题</Badge>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <div className="mt-1.5 space-y-1">
+                                        {snap.angles.length > 0 && (
+                                          <div className="flex flex-wrap gap-1 items-center">
+                                            <span className="text-[10px] text-gray-500 w-14">已覆盖：</span>
+                                            {snap.angles.map((a) => (
+                                              <span
+                                                key={a}
+                                                className={cn(
+                                                  'px-1.5 py-0.5 text-[10px] rounded',
+                                                  newlyCovered.includes(a)
+                                                    ? 'bg-emerald-100 text-emerald-700 font-medium'
+                                                    : 'bg-gray-100 text-gray-600',
+                                                )}
+                                              >
+                                                {a}
+                                                {newlyCovered.includes(a) && ' ✨'}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {snap.missingAngles.length > 0 && (
+                                          <div className="flex flex-wrap gap-1 items-center">
+                                            <span className="text-[10px] text-gray-500 w-14">缺失：</span>
+                                            {snap.missingAngles.map((a) => (
+                                              <span
+                                                key={a}
+                                                className={cn(
+                                                  'px-1.5 py-0.5 text-[10px] rounded',
+                                                  'bg-red-50 text-red-600',
+                                                )}
+                                              >
+                                                {a}
+                                                {!prevSnap?.missingAngles.includes(a) && !isInitial && ' 🆕'}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {newlyResolved.length > 0 && (
+                                          <div className="flex flex-wrap gap-1 items-center">
+                                            <span className="text-[10px] text-emerald-600 w-14 font-medium">补齐：</span>
+                                            {newlyResolved.map((a) => (
+                                              <span
+                                                key={a}
+                                                className="px-1.5 py-0.5 text-[10px] rounded bg-emerald-100 text-emerald-700"
+                                              >
+                                                {a} ✅
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>

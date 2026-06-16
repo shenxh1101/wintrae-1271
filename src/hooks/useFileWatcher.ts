@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useAppStore } from '@/store/appStore';
 import { useProcessStore } from '@/store/processStore';
-import { processImageFile, validateImage, groupImagesByProduct, addMissingAngleIssues, refineImageType, generateSequentialNames } from '@/services/imageService';
+import { processImageFile, validateImage, groupImagesByProduct, addMissingAngleIssues, refineImageType, generateSequentialNames, buildProductSnapshots } from '@/services/imageService';
 import {
   selectFolder,
   reReadSavedDirectory,
@@ -11,14 +11,16 @@ import {
   getKnownFilePaths,
   addKnownFilePaths,
   clearKnownFilePaths,
+  addScanLog,
+  clearScanLogs,
 } from '@/services/fileService';
-import type { ImageItem, ProductGroup } from '@/types';
+import type { ImageItem, ProductGroup, TimelineEvent } from '@/types';
 import { generateId } from '@/utils/formatters';
 
 const POLL_INTERVAL_MS = 5000;
 
 export function useFileWatcher() {
-  const { selectedPlatformId, customSkuPattern, getPlatformRule, addProcessRecord, updateProcessRecord } = useAppStore();
+  const { selectedPlatformId, customSkuPattern, getPlatformRule, addProcessRecord, updateProcessRecord, appendTimelineEvent } = useAppStore();
   const {
     currentBatch,
     isWatching,
@@ -39,6 +41,14 @@ export function useFileWatcher() {
   const buildRecordAndSave = useCallback(
     (batchId: string, platformName: string, folderPath: string, allImages: ImageItem[], groups: ProductGroup[]) => {
       const imgRecords = allImages.map(convertToImageRecord);
+      const initialEvent: TimelineEvent = {
+        id: generateId(),
+        timestamp: Date.now(),
+        type: 'initial',
+        label: '首次处理',
+        description: `加载 ${allImages.length} 张图片，识别出 ${groups.length} 个商品`,
+        snapshots: buildProductSnapshots(allImages, groups),
+      };
       addProcessRecord({
         id: batchId,
         platformName,
@@ -50,6 +60,7 @@ export function useFileWatcher() {
         endTime: Date.now(),
         images: imgRecords,
         groups,
+        timeline: [initialEvent],
       });
     },
     [addProcessRecord],
@@ -134,6 +145,30 @@ export function useFileWatcher() {
       if (!append) {
         buildRecordAndSave(batchId, platformRule.name, filesWithPath[0]?.path || '', imagesWithAngleIssues, productGroups);
       } else {
+        const snapshots = buildProductSnapshots(imagesWithAngleIssues, productGroups);
+        const prev = useAppStore.getState().getProcessRecord(batchId);
+        const prevSnapshots = prev?.timeline?.slice(-1)[0]?.snapshots || [];
+
+        const prevMissing: Record<string, number> = {};
+        for (const s of prevSnapshots) prevMissing[s.productCode] = s.missingAngles.length;
+        const fixedProducts: string[] = [];
+        for (const s of snapshots) {
+          const prevCount = prevMissing[s.productCode] ?? 999;
+          if (prevCount > 0 && s.missingAngles.length < prevCount) fixedProducts.push(s.productCode);
+        }
+
+        const appendEvent: TimelineEvent = {
+          id: generateId(),
+          timestamp: Date.now(),
+          type: 'append',
+          label: `追加 ${refinedImages.length} 张图片`,
+          description:
+            fixedProducts.length > 0
+              ? `${fixedProducts.slice(0, 3).join('、')}${fixedProducts.length > 3 ? ` 等 ${fixedProducts.length} 个商品缺图有变化` : ' 的缺图情况有变化'}`
+              : undefined,
+          snapshots,
+        };
+
         updateProcessRecord(batchId, {
           totalImages: imagesWithAngleIssues.length,
           issueCount: imagesWithAngleIssues.reduce((s, img) => s + img.issues.filter((i) => !i.resolved).length, 0),
@@ -141,6 +176,7 @@ export function useFileWatcher() {
           images: imagesWithAngleIssues.map(convertToImageRecord),
           groups: productGroups,
         });
+        appendTimelineEvent(batchId, appendEvent);
       }
 
       setProgress(100, '处理完成');
@@ -160,8 +196,27 @@ export function useFileWatcher() {
       const latestBatch = state.currentBatch;
       if (!latestBatch) return;
 
-      const files = await reReadSavedDirectory();
+      let files = null;
+      try {
+        files = await reReadSavedDirectory();
+      } catch (e: any) {
+        addScanLog({
+          status: 'error',
+          newFileCount: 0,
+          totalFileCount: 0,
+          message: `读取目录失败: ${e?.message || '未知错误'}`,
+        });
+        if (showAlert) alert('目录读取失败，请检查权限');
+        return;
+      }
+
       if (!files) {
+        addScanLog({
+          status: 'warning',
+          newFileCount: 0,
+          totalFileCount: 0,
+          message: '目录权限已失效',
+        });
         if (showAlert) alert('目录权限已失效，请停止监控后重新启动');
         return;
       }
@@ -175,10 +230,22 @@ export function useFileWatcher() {
       }
 
       if (newFiles.length === 0) {
+        addScanLog({
+          status: 'success',
+          newFileCount: 0,
+          totalFileCount: files.length,
+          message: `扫描完成，目录共 ${files.length} 张图，无新增`,
+        });
         if (showAlert) alert('没有检测到新图片');
         return;
       }
 
+      addScanLog({
+        status: 'success',
+        newFileCount: newFiles.length,
+        totalFileCount: files.length,
+        message: `发现 ${newFiles.length} 张新图片`,
+      });
       addKnownFilePaths(newFiles.map((f) => f.path));
       await processFilesInternal(newFiles, platformRule, true);
       if (showAlert) alert(`检测到 ${newFiles.length} 张新图片，已追加到处理列表`);
@@ -216,7 +283,14 @@ export function useFileWatcher() {
     if (files.length === 0) return;
 
     clearKnownFilePaths();
+    clearScanLogs();
     addKnownFilePaths(files.map((f) => f.path));
+    addScanLog({
+      status: 'success',
+      newFileCount: files.length,
+      totalFileCount: files.length,
+      message: `启动监控，共加载 ${files.length} 张图片`,
+    });
 
     await processFilesInternal(files, platformRule, false);
     setIsWatching(true);
@@ -227,6 +301,12 @@ export function useFileWatcher() {
     stopPolling();
     clearSavedDirectoryHandle();
     clearKnownFilePaths();
+    addScanLog({
+      status: 'success',
+      newFileCount: 0,
+      totalFileCount: 0,
+      message: '已停止监控',
+    });
     setIsWatching(false);
   }, [stopPolling, setIsWatching]);
 

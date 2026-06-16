@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { FileImage, Archive, FileSpreadsheet, FileCheck, Package, CheckCircle2, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
+import { FileImage, Archive, FileSpreadsheet, FileCheck, Package, CheckCircle2, AlertTriangle, ChevronDown, ChevronRight, FolderTree, Image as ImageIcon } from 'lucide-react';
 import { Modal } from '@/components/common/Modal';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
@@ -23,6 +23,8 @@ export const ExportPreviewModal = ({ isOpen, onClose }: ExportPreviewModalProps)
   const [isExporting, setIsExporting] = useState(false);
   const [showValidation, setShowValidation] = useState(true);
   const [showAllMissing, setShowAllMissing] = useState(false);
+  const [showUploadDetail, setShowUploadDetail] = useState(false);
+  const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
 
   const preview = useMemo(() => {
     if (!currentBatch) return null;
@@ -258,6 +260,92 @@ export const ExportPreviewModal = ({ isOpen, onClose }: ExportPreviewModalProps)
             </div>
           )}
         </div>
+
+        {exportConfig.generateUploadFolder && preview.uploadByProduct.length > 0 && (
+          <div className="border border-blue-200 rounded-lg overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowUploadDetail(!showUploadDetail)}
+              className="w-full p-3 bg-blue-50 hover:bg-blue-100/70 transition-colors flex items-center justify-between"
+            >
+              <div className="flex items-center gap-2">
+                <FolderTree className="w-4 h-4 text-blue-600" />
+                <span className="text-sm font-medium text-gray-900">待上传包内容明细</span>
+                <Badge variant="info">
+                  {formatNumber(preview.uploadByProduct.length)} 个商品 · {formatNumber(preview.upload.count)} 张有效
+                  {preview.uploadByProduct.reduce((s, p) => s + p.excludedCount, 0) > 0 && (
+                    <span className="ml-1">· {formatNumber(preview.uploadByProduct.reduce((s, p) => s + p.excludedCount, 0))} 张被排除</span>
+                  )}
+                </Badge>
+              </div>
+              {showUploadDetail ? (
+                <ChevronDown className="w-4 h-4 text-gray-500" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-gray-500" />
+              )}
+            </button>
+
+            {showUploadDetail && (
+              <div className="p-3 bg-white border-t border-blue-100 space-y-2 max-h-80 overflow-y-auto">
+                {preview.uploadByProduct.map((pg) => (
+                  <div key={pg.productCode} className="border border-gray-100 rounded">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedProduct(expandedProduct === pg.productCode ? null : pg.productCode)
+                      }
+                      className="w-full p-2 flex items-center justify-between hover:bg-gray-50"
+                    >
+                      <div className="flex items-center gap-2">
+                        {expandedProduct === pg.productCode ? (
+                          <ChevronDown className="w-4 h-4 text-gray-500" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-gray-500" />
+                        )}
+                        <span className="font-mono text-sm font-semibold text-blue-700">{pg.productCode}</span>
+                        <Badge variant="gray">{formatNumber(pg.images.length)} 张</Badge>
+                        {pg.excludedCount > 0 && (
+                          <Badge variant="danger">{formatNumber(pg.excludedCount)} 张被排除</Badge>
+                        )}
+                      </div>
+                    </button>
+
+                    {expandedProduct === pg.productCode && (
+                      <div className="px-2 pb-2 space-y-1 border-t border-gray-100 pt-2">
+                        {pg.images.map((img, idx) => (
+                          <div
+                            key={idx}
+                            className={cn(
+                              'flex items-center gap-2 p-2 rounded text-xs',
+                              img.excluded ? 'bg-red-50' : 'bg-gray-50',
+                            )}
+                          >
+                            <ImageIcon className={cn('w-4 h-4 flex-shrink-0', img.excluded ? 'text-red-400' : 'text-blue-400')} />
+                            <span className="font-mono text-gray-900 flex-1 truncate">{img.fileName}</span>
+                            <Badge variant="gray">
+                              {img.imageType === 'main' ? '主图' : img.imageType === 'detail' ? '细节' : img.imageType === 'scene' ? '场景' : '未知'}
+                              {img.angle ? ` · ${img.angle}` : ''}
+                            </Badge>
+                            {img.fileSize != null && (
+                              <span className="text-gray-500 whitespace-nowrap">
+                                {img.fileSize < 1024 * 1024
+                                  ? `${Math.round(img.fileSize / 1024)} KB`
+                                  : `${(img.fileSize / 1024 / 1024).toFixed(1)} MB`}
+                              </span>
+                            )}
+                            {img.excluded && (
+                              <Badge variant="danger">{img.excludedReason}</Badge>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-100">
           <div className="flex items-center justify-between">

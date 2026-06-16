@@ -1,10 +1,11 @@
 import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
-import type { ImageItem, ProcessBatch, PlatformRule, ExportConfig } from '@/types';
+import type { ImageItem, ProcessBatch, PlatformRule, ExportConfig, ExportedFileItem } from '@/types';
 import { formatDate, formatDateCompact, formatFileSize, generateId } from '@/utils/formatters';
 import { compressImage } from '@/utils/pixelAnalyzer';
 import { downloadBlob } from './fileService';
 import { ISSUE_TYPE_LABELS, SEVERITY_LABELS, IMAGE_TYPE_LABELS } from '@/types/constants';
+import { IMAGE_EXTENSIONS } from '@/types/constants';
 
 export interface ExportResult {
   filename: string;
@@ -12,6 +13,108 @@ export interface ExportResult {
   compressedCount: number;
   issueCount: number;
   reviewCount: number;
+  items: ExportedFileItem[];
+}
+
+function getFileExt(originalName: string): string {
+  const idx = originalName.lastIndexOf('.');
+  return idx >= 0 ? originalName.slice(idx) : '.jpg';
+}
+
+export function buildExportFileList(
+  batch: ProcessBatch,
+  config: ExportConfig,
+  baseFolder: string,
+): ExportedFileItem[] {
+  const items: ExportedFileItem[] = [];
+  const productImages: Record<string, ImageItem[]> = {};
+
+  for (const img of batch.images) {
+    if (!productImages[img.productCode]) productImages[img.productCode] = [];
+    productImages[img.productCode].push(img);
+  }
+
+  if (config.generateUploadFolder) {
+    for (const [productCode, imgs] of Object.entries(productImages)) {
+      for (const img of imgs) {
+        const ext = getFileExt(img.originalName);
+        const fileName = `${img.newName}${ext}`;
+        const filePath = `${baseFolder}/待上传/${productCode}/${fileName}`;
+        if (img.isDuplicate) {
+          items.push({
+            category: 'upload',
+            filePath,
+            fileName,
+            productCode,
+            imageType: img.imageType,
+            angle: img.angle,
+            fileSize: img.fileSize,
+            excluded: true,
+            excludedReason: '重复图片已跳过',
+          });
+        } else {
+          items.push({
+            category: 'upload',
+            filePath,
+            fileName,
+            productCode,
+            imageType: img.imageType,
+            angle: img.angle,
+            fileSize: img.fileSize,
+          });
+        }
+      }
+    }
+  }
+
+  if (config.generateCompressed) {
+    for (const [productCode, imgs] of Object.entries(productImages)) {
+      for (const img of imgs) {
+        if (img.isDuplicate) continue;
+        const ext = getFileExt(img.originalName);
+        const fileName = `${img.newName}${ext}`;
+        const filePath = `${baseFolder}/压缩副本/${productCode}/${fileName}`;
+        items.push({
+          category: 'compressed',
+          filePath,
+          fileName,
+          productCode,
+          imageType: img.imageType,
+          angle: img.angle,
+          fileSize: Math.round(img.fileSize * (1 - (1 - config.compressionQuality) * 0.6)),
+        });
+      }
+    }
+  }
+
+  if (config.generateIssueReport) {
+    items.push({
+      category: 'issue',
+      filePath: `${baseFolder}/问题报告.xlsx`,
+      fileName: '问题报告.xlsx',
+    });
+    items.push({
+      category: 'issue',
+      filePath: `${baseFolder}/问题清单.csv`,
+      fileName: '问题清单.csv',
+    });
+  }
+
+  if (config.generateReviewList) {
+    items.push({
+      category: 'review',
+      filePath: `${baseFolder}/人工复核列表.txt`,
+      fileName: '人工复核列表.txt',
+    });
+  }
+
+  items.push({
+    category: 'summary',
+    filePath: `${baseFolder}/处理总结.txt`,
+    fileName: '处理总结.txt',
+  });
+
+  return items;
 }
 
 export function calculateExportPreview(
@@ -28,6 +131,12 @@ export function calculateExportPreview(
     missingProducts: number;
     missingList: { productCode: string; missingAngles: string[]; imageCount: number }[];
   };
+  fileList: ExportedFileItem[];
+  uploadByProduct: {
+    productCode: string;
+    images: ExportedFileItem[];
+    excludedCount: number;
+  }[];
 } {
   const uniqueProducts = new Set<string>();
   let uploadCount = 0;
@@ -87,6 +196,21 @@ export function calculateExportPreview(
   const missingProducts = missingList.length;
   const completeProducts = totalProducts - missingProducts;
 
+  const baseFolder = '平台名_图片处理_时间戳';
+  const fileList = buildExportFileList(batch, config, baseFolder);
+
+  const uploadGrouped: Record<string, ExportedFileItem[]> = {};
+  for (const item of fileList.filter((f) => f.category === 'upload')) {
+    if (!item.productCode) continue;
+    if (!uploadGrouped[item.productCode]) uploadGrouped[item.productCode] = [];
+    uploadGrouped[item.productCode].push(item);
+  }
+  const uploadByProduct = Object.entries(uploadGrouped).map(([productCode, images]) => ({
+    productCode,
+    images,
+    excludedCount: images.filter((i) => i.excluded).length,
+  }));
+
   return {
     upload: {
       count: config.generateUploadFolder ? uploadCount : 0,
@@ -105,6 +229,8 @@ export function calculateExportPreview(
       missingProducts,
       missingList,
     },
+    fileList,
+    uploadByProduct,
   };
 }
 
@@ -163,7 +289,9 @@ export async function exportResults(
   const filename = `${baseFolder}.zip`;
   downloadBlob(content, filename);
 
-  return { filename, uploadCount, compressedCount, issueCount, reviewCount };
+  const items = buildExportFileList(batch, config, baseFolder);
+
+  return { filename, uploadCount, compressedCount, issueCount, reviewCount, items };
 }
 
 async function addImagesToFolder(

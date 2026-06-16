@@ -82,6 +82,24 @@ export interface ProductGroup {
   hasSceneImages: boolean;
 }
 
+export interface ProductSnapshot {
+  productCode: string;
+  imageCount: number;
+  angles: string[];
+  missingAngles: string[];
+  issueCount: number;
+  issueTypes: string[];
+}
+
+export interface TimelineEvent {
+  id: string;
+  timestamp: number;
+  type: 'initial' | 'append' | 'export';
+  label: string;
+  description?: string;
+  snapshots: ProductSnapshot[];
+}
+
 export interface ExportConfig {
   generateUploadFolder: boolean;
   generateCompressed: boolean;
@@ -108,6 +126,8 @@ export interface ProcessRecord {
     issueFileCount: number;
     reviewFileCount: number;
   };
+  exportSnapshot?: ExportSnapshot;
+  timeline?: TimelineEvent[];
 }
 
 export interface ImageRecord {
@@ -136,4 +156,32 @@ export interface IssueSummary {
   type: IssueType;
   count: number;
   severity: Severity;
+}
+
+export interface ScanLog {
+  id: string;
+  timestamp: number;
+  status: 'success' | 'warning' | 'error';
+  newFileCount: number;
+  totalFileCount: number;
+  message: string;
+}
+
+export interface ExportedFileItem {
+  category: 'upload' | 'compressed' | 'issue' | 'review' | 'summary';
+  filePath: string;
+  fileName: string;
+  productCode?: string;
+  imageType?: ImageType;
+  angle?: string;
+  fileSize?: number;
+  excluded?: boolean;
+  excludedReason?: string;
+}
+
+export interface ExportSnapshot {
+  timestamp: number;
+  filename: string;
+  config: ExportConfig;
+  items: ExportedFileItem[];
 }

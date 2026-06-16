@@ -21,6 +21,8 @@ interface AppState {
   updateProcessRecord: (id: string, updates: Partial<ProcessRecord>) => void;
   setProcessRecords: (records: ProcessRecord[]) => void;
   getPlatformRule: (id: string) => PlatformRule | undefined;
+  getProcessRecord: (id: string) => ProcessRecord | undefined;
+  appendTimelineEvent: (id: string, event: ProcessRecord['timeline'] extends (infer E)[] ? E : never) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -98,6 +100,20 @@ export const useAppStore = create<AppState>()(
 
       getPlatformRule: (id) => {
         return get().platformRules.find((rule) => rule.id === id);
+      },
+
+      getProcessRecord: (id) => {
+        return get().processRecords.find((record) => record.id === id);
+      },
+
+      appendTimelineEvent: (id, event) => {
+        set((state) => ({
+          processRecords: state.processRecords.map((record) =>
+            record.id === id
+              ? { ...record, timeline: [...(record.timeline || []), event] }
+              : record,
+          ),
+        }));
       },
     }),
     {

@@ -1,4 +1,4 @@
-import type { ImageItem, ImageIssue, PlatformRule, ProductGroup, ImageType } from '@/types';
+import type { ImageItem, ImageIssue, PlatformRule, ProductGroup, ImageType, ProductSnapshot } from '@/types';
 import { generatePHash, getImageDataFromFile, isSimilar } from '@/utils/phash';
 import { analyzeWhiteBackground, getImageDimensions, isValidAspectRatio } from '@/utils/pixelAnalyzer';
 import { extractProductCode, extractImageType, extractAngle, extractSequence, generateNewName, checkNamingConflict } from '@/utils/filenameParser';
@@ -300,4 +300,31 @@ export function generateSequentialNames(images: ImageItem[], platformRule: Platf
   }
 
   return updatedImages;
+}
+
+export function buildProductSnapshots(images: ImageItem[], groups: ProductGroup[]): ProductSnapshot[] {
+  const byProduct: Record<string, ImageItem[]> = {};
+  for (const img of images) {
+    if (!byProduct[img.productCode]) byProduct[img.productCode] = [];
+    byProduct[img.productCode].push(img);
+  }
+
+  return groups.map((g) => {
+    const imgs = byProduct[g.productCode] || [];
+    const angles = Array.from(new Set(imgs.map((i) => i.angle).filter(Boolean) as string[]));
+    const issueTypes = Array.from(
+      new Set(
+        imgs.flatMap((i) => i.issues.filter((iss) => !iss.resolved).map((iss) => iss.type)),
+      ),
+    );
+    const issueCount = imgs.reduce((sum, i) => sum + i.issues.filter((iss) => !iss.resolved).length, 0);
+    return {
+      productCode: g.productCode,
+      imageCount: imgs.length,
+      angles,
+      missingAngles: [...g.missingAngles],
+      issueCount,
+      issueTypes,
+    };
+  });
 }
