@@ -26,7 +26,7 @@ export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       platformRules: DEFAULT_PLATFORM_RULES,
-      processRecords: MOCK_PROCESS_RECORDS,
+      processRecords: [],
       selectedPlatformId: DEFAULT_PLATFORM_RULES[0]?.id || null,
       watchFolderPath: '',
       exportConfig: {
@@ -93,6 +93,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'image-processor-storage',
+      version: 2,
       partialize: (state) => ({
         platformRules: state.platformRules,
         processRecords: state.processRecords,

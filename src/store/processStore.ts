@@ -11,6 +11,7 @@ interface ProcessState {
   filterType: 'all' | 'withIssues' | 'main' | 'detail' | 'scene';
   initializeBatch: (platformId: string, folderPath: string) => void;
   addImages: (images: ImageItem[]) => void;
+  replaceImages: (images: ImageItem[]) => void;
   updateImage: (id: string, updates: Partial<ImageItem>) => void;
   removeImage: (id: string) => void;
   clearImages: () => void;
@@ -22,8 +23,8 @@ interface ProcessState {
   setIsWatching: (watching: boolean) => void;
   setIsProcessing: (processing: boolean) => void;
   toggleImageSelection: (id: string) => void;
-  selectAllImages: () => void;
-  deselectAllImages: () => void;
+  selectAllImages: (imageIds?: string[]) => void;
+  deselectAllImages: (imageIds?: string[]) => void;
   setFilterType: (type: ProcessState['filterType']) => void;
   completeBatch: () => void;
   resetBatch: () => void;
@@ -72,6 +73,19 @@ export const useProcessStore = create<ProcessState>((set, get) => ({
           ...state.currentBatch,
           images: [...state.currentBatch.images, ...images],
           totalImages: state.currentBatch.images.length + images.length,
+        },
+      };
+    });
+  },
+
+  replaceImages: (images) => {
+    set((state) => {
+      if (!state.currentBatch) return state;
+      return {
+        currentBatch: {
+          ...state.currentBatch,
+          images,
+          totalImages: images.length,
         },
       };
     });
@@ -199,25 +213,43 @@ export const useProcessStore = create<ProcessState>((set, get) => ({
     }));
   },
 
-  selectAllImages: () => {
-    set((state) => ({
-      selectedImageIds: state.currentBatch?.images.map((img) => img.id) || [],
-    }));
+  selectAllImages: (imageIds) => {
+    set((state) => {
+      const idsToSelect = imageIds || state.currentBatch?.images.map((img) => img.id) || [];
+      const currentSelected = new Set(state.selectedImageIds);
+      idsToSelect.forEach((id) => currentSelected.add(id));
+      return { selectedImageIds: Array.from(currentSelected) };
+    });
   },
 
-  deselectAllImages: () => set({ selectedImageIds: [] }),
+  deselectAllImages: (imageIds) => {
+    set((state) => {
+      if (!imageIds) {
+        return { selectedImageIds: [] };
+      }
+      const idsToRemove = new Set(imageIds);
+      return {
+        selectedImageIds: state.selectedImageIds.filter((id) => !idsToRemove.has(id)),
+      };
+    });
+  },
 
   setFilterType: (type) => set({ filterType: type }),
 
   completeBatch: () => {
     set((state) => {
       if (!state.currentBatch) return state;
+      const issueCount = state.currentBatch.images.reduce(
+        (sum, img) => sum + img.issues.filter((i) => !i.resolved).length,
+        0,
+      );
       return {
         currentBatch: {
           ...state.currentBatch,
           status: 'completed',
           endTime: Date.now(),
           processedImages: state.currentBatch.images.length,
+          issueCount,
         },
         isProcessing: false,
         progress: 100,

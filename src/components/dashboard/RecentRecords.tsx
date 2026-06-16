@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { Clock, Download, ChevronRight } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/common/Card';
 import { Badge } from '@/components/common/Badge';
@@ -5,6 +6,7 @@ import { useAppStore } from '@/store/appStore';
 import { formatDate, formatDuration } from '@/utils/formatters';
 
 export const RecentRecords = () => {
+  const navigate = useNavigate();
   const { processRecords } = useAppStore();
 
   return (
@@ -15,7 +17,10 @@ export const RecentRecords = () => {
             <Clock className="w-5 h-5 text-blue-900" />
             <CardTitle>最近处理记录</CardTitle>
           </div>
-          <button className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 transition-colors">
+          <button
+            onClick={() => navigate('/history')}
+            className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 transition-colors"
+          >
             查看全部
             <ChevronRight className="w-4 h-4" />
           </button>

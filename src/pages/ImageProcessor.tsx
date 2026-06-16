@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Upload, FolderOpen, Download, RotateCcw, Filter, CheckSquare, Square, Eye, EyeOff } from 'lucide-react';
+import { Upload, FolderOpen, Download, RotateCcw, Filter, CheckSquare, Square, Eye, EyeOff, Radar, StopCircle, RefreshCw } from 'lucide-react';
 import { AppLayout } from '@/components/Layout/AppLayout';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
@@ -12,7 +12,6 @@ import { useImageProcessor } from '@/hooks/useImageProcessor';
 import { useProcessStore } from '@/store/processStore';
 import { useAppStore } from '@/store/appStore';
 import { useFileWatcher } from '@/hooks/useFileWatcher';
-import { IMAGE_TYPE_LABELS } from '@/types/constants';
 import { formatNumber } from '@/utils/formatters';
 import { cn } from '@/lib/utils';
 import type { ImageItem } from '@/types';
@@ -43,14 +42,24 @@ export default function ImageProcessor() {
   } = useProcessStore();
 
   const { selectedPlatformId, platformRules, exportConfig, setExportConfig } = useAppStore();
-  const { isWatching, startWatching, checkForNewFiles } = useFileWatcher();
+  const { isWatching, startWatching, stopWatching, checkForNewFiles } = useFileWatcher();
 
   const [showProductGroups, setShowProductGroups] = useState(true);
   const [showExportOptions, setShowExportOptions] = useState(false);
 
   const selectedPlatform = platformRules.find((p) => p.id === selectedPlatformId);
   const filteredImages = getFilteredImages();
-  const allSelected = filteredImages.length > 0 && filteredImages.every((img) => selectedImageIds.includes(img.id));
+  const filteredImageIds = filteredImages.map((img) => img.id);
+  const selectedInFilter = filteredImages.filter((img) => selectedImageIds.includes(img.id));
+  const allSelected = filteredImages.length > 0 && selectedInFilter.length === filteredImages.length;
+
+  const handleSelectAll = () => {
+    if (allSelected) {
+      deselectAllImages(filteredImageIds);
+    } else {
+      selectAllImages(filteredImageIds);
+    }
+  };
 
   const filterOptions = [
     { value: 'all', label: '全部' },
@@ -96,7 +105,11 @@ export default function ImageProcessor() {
               选择文件夹或图片文件，工具将自动进行尺寸检查、白底检测、去重和分组整理
             </p>
             <div className="flex gap-4">
-              <Button size="lg" onClick={handleSelectFolder} disabled={!selectedPlatformId}>
+              <Button size="lg" onClick={startWatching} disabled={!selectedPlatformId}>
+                <Radar className="w-5 h-5 mr-2" />
+                启动监控目录
+              </Button>
+              <Button size="lg" variant="secondary" onClick={handleSelectFolder} disabled={!selectedPlatformId}>
                 <FolderOpen className="w-5 h-5 mr-2" />
                 选择文件夹
               </Button>
@@ -107,18 +120,6 @@ export default function ImageProcessor() {
             </div>
             {!selectedPlatformId && (
               <p className="text-amber-600 text-sm mt-4">请先在仪表盘或规则配置中选择一个平台</p>
-            )}
-
-            {isWatching && (
-              <div className="mt-8 p-4 bg-amber-50 border border-amber-200 rounded-lg max-w-md">
-                <p className="text-amber-700 text-sm mb-2">
-                  📁 文件夹监控已启动
-                </p>
-                <Button size="sm" variant="warning" onClick={checkForNewFiles}>
-                  <RotateCcw className="w-4 h-4 mr-1" />
-                  刷新检测新文件
-                </Button>
-              </div>
             )}
           </div>
         ) : (
@@ -149,7 +150,7 @@ export default function ImageProcessor() {
                   <div className="h-6 w-px bg-gray-200" />
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => (allSelected ? deselectAllImages() : selectAllImages())}
+                      onClick={handleSelectAll}
                       className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900"
                     >
                       {allSelected ? (
@@ -160,7 +161,7 @@ export default function ImageProcessor() {
                       {allSelected ? '取消全选' : '全选'}
                     </button>
                     <span className="text-sm text-gray-400">
-                      已选 {formatNumber(selectedImageIds.length)} / {formatNumber(filteredImages.length)}
+                      已选 {formatNumber(selectedInFilter.length)} / {formatNumber(filteredImages.length)}
                     </span>
                   </div>
                   <div className="h-6 w-px bg-gray-200" />
@@ -174,6 +175,34 @@ export default function ImageProcessor() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {isWatching ? (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg">
+                      <span className="flex items-center gap-1.5 text-sm font-medium text-emerald-700">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                        监控中
+                      </span>
+                      <div className="h-4 w-px bg-emerald-200" />
+                      <button
+                        onClick={checkForNewFiles}
+                        disabled={isProcessing}
+                        className="flex items-center gap-1 text-sm text-emerald-700 hover:text-emerald-800 disabled:opacity-50"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        检测新文件
+                      </button>
+                      <button
+                        onClick={stopWatching}
+                        disabled={isProcessing}
+                        className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
+                      >
+                        <StopCircle className="w-3.5 h-3.5" />
+                        停止
+                      </button>
+                    </div>
+                  ) : null}
                   <Button variant="secondary" size="sm" onClick={handleReset} disabled={isProcessing}>
                     <RotateCcw className="w-4 h-4 mr-1" />
                     重置

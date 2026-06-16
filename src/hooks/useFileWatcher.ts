@@ -1,18 +1,116 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useAppStore } from '@/store/appStore';
 import { useProcessStore } from '@/store/processStore';
-import { processImageFile } from '@/services/imageService';
+import { processImageFile, validateImage, groupImagesByProduct, addMissingAngleIssues, refineImageType, generateSequentialNames } from '@/services/imageService';
+import { selectFolder, FileWithPath } from '@/services/fileService';
 import type { ImageItem } from '@/types';
+import { generateId } from '@/utils/formatters';
 
 export function useFileWatcher() {
-  const { selectedPlatformId, customSkuPattern, getPlatformRule } = useAppStore();
-  const { currentBatch, isWatching, setIsWatching, addImages, updateImage, addIssue } = useProcessStore();
+  const { selectedPlatformId, customSkuPattern, getPlatformRule, addProcessRecord } = useAppStore();
+  const {
+    currentBatch,
+    isWatching,
+    setIsWatching,
+    setIsProcessing,
+    initializeBatch,
+    addImages,
+    replaceImages,
+    setProductGroups,
+    setStatus,
+    setProgress,
+    completeBatch,
+  } = useProcessStore();
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const watchIntervalRef = useRef<number | null>(null);
   const knownFilesRef = useRef<Set<string>>(new Set());
 
-  const startWatching = useCallback(() => {
+  const processFilesInternal = useCallback(
+    async (filesWithPath: FileWithPath[], platformRule: any, append: boolean) => {
+      let batchId = currentBatch?.id;
+
+      if (!currentBatch && !append) {
+        initializeBatch(selectedPlatformId!, filesWithPath[0]?.path || '');
+        batchId = useProcessStore.getState().currentBatch?.id || generateId();
+      }
+
+      if (!batchId) {
+        batchId = generateId();
+      }
+
+      setStatus('scanning');
+      setIsProcessing(true);
+      setProgress(0, '正在加载图片...');
+
+      const processedImages: ImageItem[] = [];
+      const total = filesWithPath.length;
+
+      for (let i = 0; i < filesWithPath.length; i++) {
+        const { file } = filesWithPath[i];
+        try {
+          setProgress(Math.floor((i / total) * 50), `正在处理: ${file.name} (${i + 1}/${total})`);
+          const imageItem = await processImageFile(file, batchId, platformRule, customSkuPattern);
+          processedImages.push(imageItem);
+        } catch (error) {
+          console.error('处理图片失败:', file.name, error);
+        }
+      }
+
+      setProgress(50, '正在分析图片...');
+      let refinedImages = refineImageType(processedImages);
+      refinedImages = generateSequentialNames(refinedImages, platformRule);
+
+      setProgress(70, '正在检测问题...');
+      const existingImages = append ? useProcessStore.getState().currentBatch?.images || [] : [];
+      const allExistingImages = append ? [...existingImages, ...refinedImages] : refinedImages;
+
+      for (let i = 0; i < refinedImages.length; i++) {
+        const img = refinedImages[i];
+        setProgress(70 + Math.floor((i / refinedImages.length) * 20), `正在检测: ${img.originalName}`);
+
+        const issues = validateImage(img, platformRule, allExistingImages);
+        for (const issue of issues) {
+          img.issues.push(issue);
+        }
+
+        if (img.issues.length > 0) {
+          img.status = 'error';
+        } else {
+          img.status = 'completed';
+        }
+      }
+
+      setProgress(90, '正在分组整理...');
+      const allImages = append ? [...existingImages, ...refinedImages] : refinedImages;
+      const productGroups = groupImagesByProduct(allImages, platformRule);
+      const imagesWithAngleIssues = addMissingAngleIssues(productGroups, allImages);
+
+      if (append && existingImages.length > 0) {
+        replaceImages(imagesWithAngleIssues);
+      } else {
+        addImages(refinedImages);
+      }
+      setProductGroups(productGroups);
+      completeBatch();
+
+      if (!append) {
+        addProcessRecord({
+          id: batchId,
+          platformName: platformRule.name,
+          folderPath: filesWithPath[0]?.path || '',
+          totalImages: imagesWithAngleIssues.length,
+          issueCount: imagesWithAngleIssues.reduce((sum, img) => sum + img.issues.filter((i) => !i.resolved).length, 0),
+          status: 'completed',
+          startTime: Date.now(),
+          endTime: Date.now(),
+        });
+      }
+
+      setProgress(100, '处理完成');
+    },
+    [currentBatch, selectedPlatformId, customSkuPattern, initializeBatch, addImages, replaceImages, setProductGroups, setStatus, setProgress, setIsProcessing, completeBatch, addProcessRecord],
+  );
+
+  const startWatching = useCallback(async () => {
     if (!selectedPlatformId) {
       alert('请先选择一个平台');
       return;
@@ -24,100 +122,61 @@ export function useFileWatcher() {
       return;
     }
 
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.multiple = true;
-    input.accept = 'image/*';
-    input.webkitdirectory = true;
+    const files = await selectFolder();
+    if (files.length === 0) return;
 
-    input.onchange = async (e) => {
-      const target = e.target as HTMLInputElement;
-      if (!target.files) return;
+    knownFilesRef.current.clear();
+    for (const f of files) {
+      knownFilesRef.current.add(f.path);
+    }
 
-      setIsWatching(true);
-      knownFilesRef.current.clear();
-
-      const initialFiles = Array.from(target.files);
-      for (const file of initialFiles) {
-        knownFilesRef.current.add(file.name);
-      }
-
-      watchIntervalRef.current = window.setInterval(async () => {
-        if ('showDirectoryPicker' in window) {
-          // Modern browsers - we would use the File System Access API here
-          // For now, we'll show a message that watching is active
-        }
-      }, 2000);
-
-      alert('文件夹监控已启动！\n\n注意：由于浏览器安全限制，自动监控功能有限。\n建议使用"选择文件夹"按钮手动刷新。');
-    };
-
-    input.click();
-    fileInputRef.current = input;
-  }, [selectedPlatformId, getPlatformRule, setIsWatching]);
+    await processFilesInternal(files, platformRule, false);
+    setIsWatching(true);
+  }, [selectedPlatformId, getPlatformRule, processFilesInternal, setIsWatching]);
 
   const stopWatching = useCallback(() => {
     setIsWatching(false);
-    if (watchIntervalRef.current) {
-      clearInterval(watchIntervalRef.current);
-      watchIntervalRef.current = null;
-    }
     knownFilesRef.current.clear();
   }, [setIsWatching]);
 
   const checkForNewFiles = useCallback(async () => {
-    if (!selectedPlatformId || !currentBatch) return;
+    if (!selectedPlatformId) {
+      alert('请先选择一个平台');
+      return;
+    }
+
+    const latestBatch = useProcessStore.getState().currentBatch;
+    if (!latestBatch) {
+      alert('请先开始监控并选择文件夹');
+      return;
+    }
 
     const platformRule = getPlatformRule(selectedPlatformId);
     if (!platformRule) return;
 
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.multiple = true;
-    input.accept = 'image/*';
-    input.webkitdirectory = true;
+    const files = await selectFolder();
+    if (files.length === 0) return;
 
-    input.onchange = async (e) => {
-      const target = e.target as HTMLInputElement;
-      if (!target.files) return;
-
-      const files = Array.from(target.files);
-      const newFiles: File[] = [];
-
-      for (const file of files) {
-        if (!knownFilesRef.current.has(file.name)) {
-          newFiles.push(file);
-          knownFilesRef.current.add(file.name);
-        }
+    const newFiles: FileWithPath[] = [];
+    for (const f of files) {
+      if (!knownFilesRef.current.has(f.path)) {
+        newFiles.push(f);
+        knownFilesRef.current.add(f.path);
       }
+    }
 
-      if (newFiles.length > 0) {
-        const processedImages: ImageItem[] = [];
+    if (newFiles.length === 0) {
+      alert('没有检测到新图片');
+      return;
+    }
 
-        for (const file of newFiles) {
-          try {
-            const imageItem = await processImageFile(file, currentBatch.id, platformRule, customSkuPattern);
-            processedImages.push(imageItem);
-          } catch (error) {
-            console.error('处理新文件失败:', file.name, error);
-          }
-        }
-
-        addImages(processedImages);
-        alert(`检测到 ${newFiles.length} 张新图片，已添加到处理列表`);
-      } else {
-        alert('没有检测到新图片');
-      }
-    };
-
-    input.click();
-  }, [selectedPlatformId, currentBatch, getPlatformRule, customSkuPattern, addImages]);
+    await processFilesInternal(newFiles, platformRule, true);
+    alert(`检测到 ${newFiles.length} 张新图片，已追加到处理列表`);
+  }, [selectedPlatformId, getPlatformRule, processFilesInternal]);
 
   useEffect(() => {
     return () => {
-      if (watchIntervalRef.current) {
-        clearInterval(watchIntervalRef.current);
-      }
+      knownFilesRef.current.clear();
     };
   }, []);
 

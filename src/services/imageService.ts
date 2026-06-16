@@ -205,23 +205,49 @@ export function groupImagesByProduct(images: ImageItem[], platformRule: Platform
 export function addMissingAngleIssues(
   productGroups: ProductGroup[],
   images: ImageItem[],
-  addIssue: (imageId: string, issue: Omit<ImageIssue, 'id'>) => void,
-): void {
+  addIssue?: (imageId: string, issue: Omit<ImageIssue, 'id'>) => void,
+): ImageItem[] {
+  const updatedImages = [...images];
+
   for (const group of productGroups) {
     if (group.missingAngles.length > 0) {
-      const mainImage = images.find((img) => group.imageIds.includes(img.id) && img.imageType === 'main') || images.find((img) => group.imageIds.includes(img.id));
+      const mainImageIdx = updatedImages.findIndex(
+        (img) => group.imageIds.includes(img.id) && img.imageType === 'main',
+      );
+      const fallbackIdx = updatedImages.findIndex((img) => group.imageIds.includes(img.id));
+      const targetIdx = mainImageIdx >= 0 ? mainImageIdx : fallbackIdx;
 
-      if (mainImage) {
-        addIssue(mainImage.id, {
+      if (targetIdx >= 0) {
+        const targetImage = updatedImages[targetIdx];
+        const newIssue: ImageIssue = {
+          id: generateId(),
           type: 'missingAngle',
-          severity: 'info',
+          severity: 'warning',
           description: `商品 ${group.productCode} 缺少角度: ${group.missingAngles.join('、')}`,
           suggestion: '请补充对应角度的图片',
           resolved: false,
-        });
+        };
+
+        updatedImages[targetIdx] = {
+          ...targetImage,
+          issues: [...targetImage.issues, newIssue],
+          status: targetImage.status === 'completed' ? 'error' : targetImage.status,
+        };
+
+        if (addIssue) {
+          addIssue(targetImage.id, {
+            type: newIssue.type,
+            severity: newIssue.severity,
+            description: newIssue.description,
+            suggestion: newIssue.suggestion,
+            resolved: newIssue.resolved,
+          });
+        }
       }
     }
   }
+
+  return updatedImages;
 }
 
 export function refineImageType(images: ImageItem[]): ImageItem[] {

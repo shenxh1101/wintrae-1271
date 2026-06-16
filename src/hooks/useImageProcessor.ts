@@ -15,7 +15,6 @@ export function useImageProcessor() {
     initializeBatch,
     addImages,
     updateImage,
-    addIssue,
     setProductGroups,
     setStatus,
     setProgress,
@@ -62,8 +61,15 @@ export function useImageProcessor() {
 
   const processFiles = useCallback(
     async (filesWithPath: FileWithPath[], platformRule: any) => {
+      let batchId = currentBatch?.id;
+
       if (!currentBatch) {
         initializeBatch(selectedPlatformId!, filesWithPath[0]?.path || '');
+        batchId = useProcessStore.getState().currentBatch?.id || generateId();
+      }
+
+      if (!batchId) {
+        batchId = generateId();
       }
 
       setStatus('scanning');
@@ -77,7 +83,7 @@ export function useImageProcessor() {
         const { file } = filesWithPath[i];
         try {
           setProgress(Math.floor((i / total) * 50), `正在处理: ${file.name} (${i + 1}/${total})`);
-          const imageItem = await processImageFile(file, currentBatch?.id || generateId(), platformRule, customSkuPattern);
+          const imageItem = await processImageFile(file, batchId, platformRule, customSkuPattern);
           processedImages.push(imageItem);
         } catch (error) {
           console.error('处理图片失败:', file.name, error);
@@ -107,18 +113,18 @@ export function useImageProcessor() {
 
       setProgress(90, '正在分组整理...');
       const productGroups = groupImagesByProduct(refinedImages, platformRule);
-      addMissingAngleIssues(productGroups, refinedImages, addIssue);
+      const imagesWithAngleIssues = addMissingAngleIssues(productGroups, refinedImages);
 
-      addImages(refinedImages);
+      addImages(imagesWithAngleIssues);
       setProductGroups(productGroups);
       completeBatch();
 
       addProcessRecord({
-        id: currentBatch?.id || generateId(),
+        id: batchId,
         platformName: platformRule.name,
         folderPath: filesWithPath[0]?.path || '',
-        totalImages: refinedImages.length,
-        issueCount: refinedImages.reduce((sum, img) => sum + img.issues.filter((i) => !i.resolved).length, 0),
+        totalImages: imagesWithAngleIssues.length,
+        issueCount: imagesWithAngleIssues.reduce((sum, img) => sum + img.issues.filter((i) => !i.resolved).length, 0),
         status: 'completed',
         startTime: Date.now(),
         endTime: Date.now(),
@@ -126,7 +132,7 @@ export function useImageProcessor() {
 
       setProgress(100, '处理完成');
     },
-    [currentBatch, selectedPlatformId, customSkuPattern, initializeBatch, addImages, addIssue, setProductGroups, setStatus, setProgress, setIsProcessing, completeBatch, addProcessRecord],
+    [currentBatch, selectedPlatformId, customSkuPattern, initializeBatch, addImages, setProductGroups, setStatus, setProgress, setIsProcessing, completeBatch, addProcessRecord],
   );
 
   const handleExport = useCallback(async () => {
