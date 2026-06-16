@@ -14,6 +14,23 @@ export interface FileWithPath {
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff'];
 
 let savedDirectoryHandle: any = null;
+const knownFilePaths = new Set<string>();
+
+export function getKnownFilePaths(): Set<string> {
+  return knownFilePaths;
+}
+
+export function addKnownFilePath(path: string): void {
+  knownFilePaths.add(path);
+}
+
+export function addKnownFilePaths(paths: string[]): void {
+  paths.forEach((p) => knownFilePaths.add(p));
+}
+
+export function clearKnownFilePaths(): void {
+  knownFilePaths.clear();
+}
 
 function isImageFile(filename: string): boolean {
   const lowerName = filename.toLowerCase();

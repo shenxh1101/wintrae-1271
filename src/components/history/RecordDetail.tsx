@@ -27,6 +27,7 @@ export const RecordDetail = ({ isOpen, onClose, record }: RecordDetailProps) => 
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [issueFilter, setIssueFilter] = useState<string>('all');
+  const [groupFilter, setGroupFilter] = useState<string>('all');
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
 
   const issueStats = useMemo(() => {
@@ -108,6 +109,23 @@ export const RecordDetail = ({ isOpen, onClose, record }: RecordDetailProps) => 
     }
     return list;
   }, [record, issueFilter, searchTerm]);
+
+  const filteredGroups = useMemo(() => {
+    if (!record.groups) return [] as ProductGroup[];
+    return record.groups.filter((g: ProductGroup) => {
+      if (groupFilter === 'missing' && g.missingAngles.length === 0) return false;
+      if (groupFilter === 'hasIssues') {
+        const groupImages = record.images?.filter((im: ImageRecord) => g.imageIds.includes(im.id)) || [];
+        const hasIssue = groupImages.some((im) => im.issues.some((i) => !i.resolved));
+        if (!hasIssue) return false;
+      }
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase();
+        if (!g.productCode.toLowerCase().includes(term)) return false;
+      }
+      return true;
+    });
+  }, [record, groupFilter, searchTerm]);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="处理记录详情" size="xl">
@@ -437,59 +455,174 @@ export const RecordDetail = ({ isOpen, onClose, record }: RecordDetailProps) => 
           )}
 
           {activeTab === 'groups' && record.groups && (
-            <div className="space-y-2">
-              {record.groups.length === 0 ? (
-                <div className="p-12 text-center text-gray-400 text-sm">无分组数据</div>
-              ) : (
-                record.groups.map((g: ProductGroup) => (
-                  <div key={g.id} className="border border-gray-200 rounded-lg overflow-hidden">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                  {[
+                    { value: 'all', label: '全部' },
+                    { value: 'missing', label: '缺图' },
+                    { value: 'hasIssues', label: '有问题' },
+                  ].map((opt) => (
                     <button
-                      onClick={() => setExpandedGroup(expandedGroup === g.id ? null : g.id)}
-                      className="w-full p-3 bg-gray-50 hover:bg-gray-100 transition-colors flex items-center justify-between"
+                      key={opt.value}
+                      onClick={() => setGroupFilter(opt.value)}
+                      className={cn(
+                        'px-3 py-1 text-xs rounded-md transition-colors',
+                        groupFilter === opt.value
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900',
+                      )}
                     >
-                      <div className="flex items-center gap-2">
-                        {expandedGroup === g.id ? (
-                          <ChevronDown className="w-4 h-4 text-gray-500" />
-                        ) : (
-                          <ChevronRight className="w-4 h-4 text-gray-500" />
-                        )}
-                        <span className="font-mono text-sm text-blue-600 font-medium">{g.productCode}</span>
-                        <span className="text-xs text-gray-500">
-                          {formatNumber(g.imageIds.length)} 张图
-                        </span>
-                        {g.missingAngles.length > 0 && (
-                          <Badge variant="warning">
-                            缺: {g.missingAngles.join('、')}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        {g.hasMainImage && <Badge variant="success">主图</Badge>}
-                        {g.hasDetailImages && <Badge variant="info">细节</Badge>}
-                        {g.hasSceneImages && <Badge variant="gray">场景</Badge>}
-                      </div>
+                      {opt.label}
                     </button>
-                    {expandedGroup === g.id && record.images && (
-                      <div className="p-3 space-y-1.5 bg-white border-t border-gray-100">
-                        {record.images
-                          .filter((im: ImageRecord) => g.imageIds.includes(im.id))
-                          .map((im: ImageRecord) => (
-                            <div key={im.id} className="flex items-center justify-between text-xs py-1 px-2 rounded hover:bg-gray-50">
-                              <span className="text-gray-700 truncate max-w-[70%]">{im.newName}</span>
-                              <div className="flex items-center gap-2">
-                                <Badge variant="info">{IMAGE_TYPE_LABELS[im.imageType]}</Badge>
-                                {im.issues.filter((i) => !i.resolved).length > 0 && (
-                                  <span className="text-amber-600 font-medium">
-                                    {formatNumber(im.issues.filter((i) => !i.resolved).length)} 个问题
-                                  </span>
+                  ))}
+                </div>
+                <span className="text-xs text-gray-400">
+                  共 {formatNumber(filteredGroups.length)} 个商品
+                </span>
+              </div>
+
+              {filteredGroups.length === 0 ? (
+                <div className="p-12 text-center text-gray-400 text-sm border border-dashed rounded-lg">
+                  <FolderKanban className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                  没有符合条件的商品
+                </div>
+              ) : (
+                filteredGroups.map((g: ProductGroup) => {
+                  const groupImages = record.images?.filter((im: ImageRecord) => g.imageIds.includes(im.id)) || [];
+                  const issueCount = groupImages.reduce((s, im) => s + im.issues.filter((i) => !i.resolved).length, 0);
+                  const presentAngles = Array.from(new Set(groupImages.map((im) => im.angle).filter(Boolean)));
+
+                  return (
+                    <div key={g.id} className="border border-gray-200 rounded-lg overflow-hidden">
+                      <button
+                        onClick={() => setExpandedGroup(expandedGroup === g.id ? null : g.id)}
+                        className="w-full p-3 bg-gray-50 hover:bg-gray-100 transition-colors flex items-center justify-between text-left"
+                      >
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {expandedGroup === g.id ? (
+                            <ChevronDown className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                          )}
+                          <span className="font-mono text-sm text-blue-600 font-medium">{g.productCode}</span>
+                          <span className="text-xs text-gray-500">
+                            {formatNumber(g.imageIds.length)} 张图
+                          </span>
+                          {issueCount > 0 && (
+                            <Badge variant="warning">{formatNumber(issueCount)} 个问题</Badge>
+                          )}
+                          {g.missingAngles.length > 0 ? (
+                            <Badge variant="danger">缺 {g.missingAngles.length} 个角度</Badge>
+                          ) : (
+                            <Badge variant="success">套图完整</Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          {g.hasMainImage && <Badge variant="success">主图</Badge>}
+                          {g.hasDetailImages && <Badge variant="info">细节</Badge>}
+                          {g.hasSceneImages && <Badge variant="gray">场景</Badge>}
+                        </div>
+                      </button>
+
+                      {expandedGroup === g.id && record.images && (
+                        <div className="p-3 bg-white border-t border-gray-100 space-y-3">
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-medium text-gray-500 w-16 flex-shrink-0">已覆盖角度</span>
+                              <div className="flex flex-wrap gap-1">
+                                {presentAngles.length > 0 ? (
+                                  presentAngles.map((a) => (
+                                    <Badge key={a} variant="success">{a}</Badge>
+                                  ))
+                                ) : (
+                                  <span className="text-xs text-gray-400">无</span>
                                 )}
                               </div>
                             </div>
-                          ))}
-                      </div>
-                    )}
-                  </div>
-                ))
+                            {g.missingAngles.length > 0 && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium text-gray-500 w-16 flex-shrink-0">缺失角度</span>
+                                <div className="flex flex-wrap gap-1">
+                                  {g.missingAngles.map((a) => (
+                                    <Badge key={a} variant="danger">{a}</Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="space-y-2">
+                            {(['main', 'detail', 'scene'] as const).map((type) => {
+                              const typeImages = groupImages.filter((im) => im.imageType === type);
+                              if (typeImages.length === 0) return null;
+                              return (
+                                <div key={type} className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant={type === 'main' ? 'success' : type === 'detail' ? 'info' : 'gray'}>
+                                      {IMAGE_TYPE_LABELS[type]} ({formatNumber(typeImages.length)})
+                                    </Badge>
+                                  </div>
+                                  <div className="space-y-1 pl-2 border-l-2 border-gray-100 ml-2">
+                                    {typeImages.map((im) => (
+                                      <div key={im.id} className="py-1 px-2 rounded hover:bg-gray-50">
+                                        <div className="flex items-center justify-between text-xs">
+                                          <span className="text-gray-700 truncate max-w-[60%]">
+                                            {im.newName}
+                                          </span>
+                                          <div className="flex items-center gap-2 flex-shrink-0">
+                                            {im.angle && (
+                                              <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                                                {im.angle}
+                                              </span>
+                                            )}
+                                            {im.issues.filter((i) => !i.resolved).length > 0 ? (
+                                              <span className="text-amber-600 font-medium">
+                                                {formatNumber(im.issues.filter((i) => !i.resolved).length)} 个问题
+                                              </span>
+                                            ) : (
+                                              <span className="text-emerald-600 text-[10px]">正常</span>
+                                            )}
+                                          </div>
+                                        </div>
+                                        {im.issues.filter((i) => !i.resolved).length > 0 && (
+                                          <div className="mt-1 space-y-0.5 pl-2 border-l border-amber-200">
+                                            {im.issues.filter((i) => !i.resolved).slice(0, 3).map((issue) => (
+                                              <p key={issue.id} className="text-[10px] text-gray-500 truncate">
+                                                <span className="text-amber-600">•</span> {issue.description}
+                                              </p>
+                                            ))}
+                                            {im.issues.filter((i) => !i.resolved).length > 3 && (
+                                              <p className="text-[10px] text-gray-400">
+                                                还有 {formatNumber(im.issues.filter((i) => !i.resolved).length - 3)} 个问题...
+                                              </p>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {groupImages.filter((im) => im.imageType === 'unknown').length > 0 && (
+                              <div className="space-y-1">
+                                <Badge variant="gray">未知类型 ({formatNumber(groupImages.filter((im) => im.imageType === 'unknown').length)})</Badge>
+                                <div className="space-y-1 pl-2 border-l-2 border-gray-100 ml-2">
+                                  {groupImages.filter((im) => im.imageType === 'unknown').map((im) => (
+                                    <div key={im.id} className="py-1 px-2 rounded hover:bg-gray-50 text-xs text-gray-500">
+                                      {im.newName}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           )}

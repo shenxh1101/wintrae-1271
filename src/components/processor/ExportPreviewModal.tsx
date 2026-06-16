@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { FileImage, Archive, FileSpreadsheet, FileCheck, Package, CheckCircle2 } from 'lucide-react';
+import { FileImage, Archive, FileSpreadsheet, FileCheck, Package, CheckCircle2, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import { Modal } from '@/components/common/Modal';
 import { Button } from '@/components/common/Button';
 import { Badge } from '@/components/common/Badge';
@@ -21,6 +21,8 @@ export const ExportPreviewModal = ({ isOpen, onClose }: ExportPreviewModalProps)
   const { currentBatch, isProcessing } = useProcessStore();
   const { handleExport } = useImageProcessor();
   const [isExporting, setIsExporting] = useState(false);
+  const [showValidation, setShowValidation] = useState(true);
+  const [showAllMissing, setShowAllMissing] = useState(false);
 
   const preview = useMemo(() => {
     if (!currentBatch) return null;
@@ -178,6 +180,83 @@ export const ExportPreviewModal = ({ isOpen, onClose }: ExportPreviewModalProps)
               </div>
             </div>
           ))}
+        </div>
+
+        <div className="border border-amber-200 rounded-lg overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowValidation(!showValidation)}
+            className="w-full p-3 bg-amber-50 hover:bg-amber-100/70 transition-colors flex items-center justify-between"
+          >
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600" />
+              <span className="text-sm font-medium text-gray-900">批次校验结果</span>
+              <Badge variant="warning">
+                {preview.validation.missingProducts > 0
+                ? `${formatNumber(preview.validation.missingProducts)} 个商品缺图`
+                : '套图完整'}
+              </Badge>
+            </div>
+            {showValidation ? (
+              <ChevronDown className="w-4 h-4 text-gray-500" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-gray-500" />
+            )}
+          </button>
+
+          {showValidation && (
+            <div className="p-3 bg-white border-t border-amber-100 space-y-3">
+              <div className="grid grid-cols-3 gap-2">
+                <div className="p-2 bg-gray-50 rounded text-center">
+                  <p className="text-lg font-bold text-gray-900">{formatNumber(preview.validation.totalProducts)}</p>
+                  <p className="text-xs text-gray-500">商品总数</p>
+                </div>
+                <div className="p-2 bg-emerald-50 rounded text-center">
+                  <p className="text-lg font-bold text-emerald-600">{formatNumber(preview.validation.completeProducts)}</p>
+                  <p className="text-xs text-gray-500">套图完整</p>
+                </div>
+                <div className="p-2 bg-amber-50 rounded text-center">
+                  <p className="text-lg font-bold text-amber-600">{formatNumber(preview.validation.missingProducts)}</p>
+                  <p className="text-xs text-gray-500">缺少角度</p>
+                </div>
+              </div>
+
+              {preview.validation.missingList.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-gray-600">缺图商品清单：</p>
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {(showAllMissing ? preview.validation.missingList : preview.validation.missingList.slice(0, 5)).map((item) => (
+                      <div
+                        key={item.productCode}
+                        className="flex items-center justify-between py-1.5 px-2 bg-amber-50/50 rounded text-xs"
+                      >
+                        <span className="font-mono text-blue-600">{item.productCode}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-gray-500">{formatNumber(item.imageCount)} 张</span>
+                          <Badge variant="danger">缺 {item.missingAngles.length} 个</Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {preview.validation.missingList.length > 5 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllMissing(!showAllMissing)}
+                      className="text-xs text-blue-600 hover:text-blue-700"
+                    >
+                      {showAllMissing ? '收起' : `查看全部 ${formatNumber(preview.validation.missingList.length)} 个商品 →`}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {preview.validation.missingList.length === 0 && (
+                <div className="text-center py-3 text-emerald-600 text-sm">
+                  所有商品套图完整，可以直接导出 ✅
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-100">

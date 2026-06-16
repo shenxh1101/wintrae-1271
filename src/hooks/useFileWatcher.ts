@@ -2,7 +2,16 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useAppStore } from '@/store/appStore';
 import { useProcessStore } from '@/store/processStore';
 import { processImageFile, validateImage, groupImagesByProduct, addMissingAngleIssues, refineImageType, generateSequentialNames } from '@/services/imageService';
-import { selectFolder, reReadSavedDirectory, clearSavedDirectoryHandle, FileWithPath, convertToImageRecord } from '@/services/fileService';
+import {
+  selectFolder,
+  reReadSavedDirectory,
+  clearSavedDirectoryHandle,
+  FileWithPath,
+  convertToImageRecord,
+  getKnownFilePaths,
+  addKnownFilePaths,
+  clearKnownFilePaths,
+} from '@/services/fileService';
 import type { ImageItem, ProductGroup } from '@/types';
 import { generateId } from '@/utils/formatters';
 
@@ -24,8 +33,8 @@ export function useFileWatcher() {
     completeBatch,
   } = useProcessStore();
 
-  const knownFilesRef = useRef<Set<string>>(new Set());
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isMountedRef = useRef(false);
 
   const buildRecordAndSave = useCallback(
     (batchId: string, platformName: string, folderPath: string, allImages: ImageItem[], groups: ProductGroup[]) => {
@@ -83,13 +92,13 @@ export function useFileWatcher() {
 
       setProgress(70, '正在检测问题...');
       const existingImages = append ? useProcessStore.getState().currentBatch?.images || [] : [];
-      const allExistingImages = append ? [...existingImages, ...refinedImages] : refinedImages;
 
       for (let i = 0; i < refinedImages.length; i++) {
         const img = refinedImages[i];
         setProgress(70 + Math.floor((i / Math.max(1, refinedImages.length)) * 20), `正在检测: ${img.originalName}`);
 
-        const issues = validateImage(img, platformRule, allExistingImages);
+        const allForValidation = append ? [...existingImages, ...refinedImages] : refinedImages;
+        const issues = validateImage(img, platformRule, allForValidation);
         for (const issue of issues) {
           img.issues.push(issue);
         }
@@ -102,7 +111,15 @@ export function useFileWatcher() {
       }
 
       setProgress(90, '正在分组整理...');
-      const allImages = append ? [...existingImages, ...refinedImages] : refinedImages;
+      let allImages = append ? [...existingImages, ...refinedImages] : refinedImages;
+
+      if (append) {
+        allImages = allImages.map((img) => ({
+          ...img,
+          issues: img.issues.filter((i) => i.type !== 'missingAngle'),
+        }));
+      }
+
       const productGroups = groupImagesByProduct(allImages, platformRule);
       const imagesWithAngleIssues = addMissingAngleIssues(productGroups, allImages);
 
@@ -149,11 +166,11 @@ export function useFileWatcher() {
         return;
       }
 
+      const knownPaths = getKnownFilePaths();
       const newFiles: FileWithPath[] = [];
       for (const f of files) {
-        if (!knownFilesRef.current.has(f.path)) {
+        if (!knownPaths.has(f.path)) {
           newFiles.push(f);
-          knownFilesRef.current.add(f.path);
         }
       }
 
@@ -162,6 +179,7 @@ export function useFileWatcher() {
         return;
       }
 
+      addKnownFilePaths(newFiles.map((f) => f.path));
       await processFilesInternal(newFiles, platformRule, true);
       if (showAlert) alert(`检测到 ${newFiles.length} 张新图片，已追加到处理列表`);
     },
@@ -197,10 +215,8 @@ export function useFileWatcher() {
     const files = await selectFolder();
     if (files.length === 0) return;
 
-    knownFilesRef.current.clear();
-    for (const f of files) {
-      knownFilesRef.current.add(f.path);
-    }
+    clearKnownFilePaths();
+    addKnownFilePaths(files.map((f) => f.path));
 
     await processFilesInternal(files, platformRule, false);
     setIsWatching(true);
@@ -210,13 +226,23 @@ export function useFileWatcher() {
   const stopWatching = useCallback(() => {
     stopPolling();
     clearSavedDirectoryHandle();
-    knownFilesRef.current.clear();
+    clearKnownFilePaths();
     setIsWatching(false);
   }, [stopPolling, setIsWatching]);
 
   const checkForNewFiles = useCallback(async () => {
     await scanForNewFiles(true);
   }, [scanForNewFiles]);
+
+  useEffect(() => {
+    if (!isMountedRef.current) {
+      isMountedRef.current = true;
+      if (isWatching) {
+        startPolling();
+      }
+      return;
+    }
+  }, [isWatching, startPolling]);
 
   useEffect(() => {
     const onFocus = () => {
@@ -228,8 +254,6 @@ export function useFileWatcher() {
     return () => {
       window.removeEventListener('focus', onFocus);
       stopPolling();
-      clearSavedDirectoryHandle();
-      knownFilesRef.current.clear();
     };
   }, [scanForNewFiles, stopPolling]);
 

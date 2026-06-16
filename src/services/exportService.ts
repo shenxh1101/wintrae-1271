@@ -22,6 +22,12 @@ export function calculateExportPreview(
   compressed: { count: number; products: number; sizeSaved: string };
   issue: { count: number };
   review: { count: number };
+  validation: {
+    totalProducts: number;
+    completeProducts: number;
+    missingProducts: number;
+    missingList: { productCode: string; missingAngles: string[]; imageCount: number }[];
+  };
 } {
   const uniqueProducts = new Set<string>();
   let uploadCount = 0;
@@ -62,6 +68,25 @@ export function calculateExportPreview(
 
   const sizeSavedKB = Math.max(0, Math.round((originalSize - estimatedCompressedSize) / 1024));
 
+  const productImageCount: Record<string, number> = {};
+  for (const img of batch.images) {
+    if (img.isDuplicate) continue;
+    productImageCount[img.productCode] = (productImageCount[img.productCode] || 0) + 1;
+  }
+
+  const missingList = batch.productGroups
+    .filter((g) => g.missingAngles.length > 0)
+    .map((g) => ({
+      productCode: g.productCode,
+      missingAngles: g.missingAngles,
+      imageCount: productImageCount[g.productCode] || 0,
+    }))
+    .sort((a, b) => b.missingAngles.length - a.missingAngles.length);
+
+  const totalProducts = batch.productGroups.length;
+  const missingProducts = missingList.length;
+  const completeProducts = totalProducts - missingProducts;
+
   return {
     upload: {
       count: config.generateUploadFolder ? uploadCount : 0,
@@ -74,6 +99,12 @@ export function calculateExportPreview(
     },
     issue: { count: config.generateIssueReport ? issueCount : 0 },
     review: { count: reviewCount },
+    validation: {
+      totalProducts,
+      completeProducts,
+      missingProducts,
+      missingList,
+    },
   };
 }
 
