@@ -100,6 +100,30 @@ export interface ProcessRecord {
   startTime: number;
   endTime: number;
   reportPath?: string;
+  images?: ImageRecord[];
+  groups?: ProductGroup[];
+  exportContent?: {
+    uploadFileCount: number;
+    compressedFileCount: number;
+    issueFileCount: number;
+    reviewFileCount: number;
+  };
+}
+
+export interface ImageRecord {
+  id: string;
+  originalName: string;
+  newName: string;
+  productCode: string;
+  imageType: 'main' | 'detail' | 'scene' | 'unknown';
+  angle: string;
+  width: number;
+  height: number;
+  fileSize: number;
+  whiteBackgroundRatio: number;
+  isDuplicate: boolean;
+  status: 'pending' | 'processing' | 'completed' | 'error';
+  issues: ImageIssue[];
 }
 
 export type IssueType = 'dimension' | 'fileSize' | 'whiteBackground' | 'duplicate' | 'missingAngle' | 'naming';

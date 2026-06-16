@@ -6,47 +6,133 @@ import { compressImage } from '@/utils/pixelAnalyzer';
 import { downloadBlob } from './fileService';
 import { ISSUE_TYPE_LABELS, SEVERITY_LABELS, IMAGE_TYPE_LABELS } from '@/types/constants';
 
+export interface ExportResult {
+  filename: string;
+  uploadCount: number;
+  compressedCount: number;
+  issueCount: number;
+  reviewCount: number;
+}
+
+export function calculateExportPreview(
+  batch: ProcessBatch,
+  config: ExportConfig,
+): {
+  upload: { count: number; products: number };
+  compressed: { count: number; products: number; sizeSaved: string };
+  issue: { count: number };
+  review: { count: number };
+} {
+  const uniqueProducts = new Set<string>();
+  let uploadCount = 0;
+  let compressedCount = 0;
+  let originalSize = 0;
+  let estimatedCompressedSize = 0;
+
+  for (const img of batch.images) {
+    if (img.isDuplicate) continue;
+    uniqueProducts.add(img.productCode);
+
+    if (config.generateUploadFolder) {
+      uploadCount++;
+      originalSize += img.fileSize;
+    }
+    if (config.generateCompressed) {
+      compressedCount++;
+      estimatedCompressedSize += img.fileSize * (1 - (1 - config.compressionQuality) * 0.6);
+    }
+  }
+
+  let issueCount = 0;
+  for (const img of batch.images) {
+    for (const issue of img.issues) {
+      if (!issue.resolved) issueCount++;
+    }
+  }
+
+  let reviewCount = 0;
+  if (config.generateReviewList) {
+    reviewCount = batch.images.filter(
+      (img) =>
+        img.issues.some((i) => i.severity === 'warning' && !i.resolved) ||
+        (img.whiteBackgroundRatio >= 0.85 && img.whiteBackgroundRatio < 0.95) ||
+        img.imageType === 'unknown',
+    ).length;
+  }
+
+  const sizeSavedKB = Math.max(0, Math.round((originalSize - estimatedCompressedSize) / 1024));
+
+  return {
+    upload: {
+      count: config.generateUploadFolder ? uploadCount : 0,
+      products: config.generateUploadFolder ? uniqueProducts.size : 0,
+    },
+    compressed: {
+      count: config.generateCompressed ? compressedCount : 0,
+      products: config.generateCompressed ? uniqueProducts.size : 0,
+      sizeSaved: sizeSavedKB > 1024 ? `${(sizeSavedKB / 1024).toFixed(1)} MB` : `${sizeSavedKB} KB`,
+    },
+    issue: { count: config.generateIssueReport ? issueCount : 0 },
+    review: { count: reviewCount },
+  };
+}
+
 export async function exportResults(
   batch: ProcessBatch,
   platformRule: PlatformRule,
   config: ExportConfig,
-): Promise<void> {
+): Promise<ExportResult | null> {
   const zip = new JSZip();
   const timestamp = formatDateCompact(Date.now());
   const baseFolder = `${platformRule.name}_图片处理_${timestamp}`;
 
+  let uploadCount = 0;
+  let compressedCount = 0;
+
   if (config.generateUploadFolder) {
     const uploadFolder = zip.folder(`${baseFolder}/待上传`);
     if (uploadFolder) {
-      await addImagesToFolder(uploadFolder, batch.images, platformRule, false);
+      uploadCount = await addImagesToFolder(uploadFolder, batch.images, platformRule, false);
     }
   }
 
   if (config.generateCompressed) {
     const compressedFolder = zip.folder(`${baseFolder}/压缩副本`);
     if (compressedFolder) {
-      await addImagesToFolder(compressedFolder, batch.images, platformRule, true, config.compressionQuality);
+      compressedCount = await addImagesToFolder(compressedFolder, batch.images, platformRule, true, config.compressionQuality);
     }
   }
 
+  let issueCount = 0;
   if (config.generateIssueReport) {
     const issueReport = generateIssueReport(batch, platformRule);
     zip.file(`${baseFolder}/问题报告.xlsx`, issueReport);
 
     const issueCsv = generateIssueCsv(batch);
     zip.file(`${baseFolder}/问题清单.csv`, issueCsv);
+
+    for (const img of batch.images) {
+      for (const issue of img.issues) {
+        if (!issue.resolved) issueCount++;
+      }
+    }
   }
 
+  let reviewCount = 0;
   if (config.generateReviewList) {
-    const reviewList = generateReviewList(batch);
-    zip.file(`${baseFolder}/人工复核列表.txt`, reviewList);
+    const { list, count } = generateReviewList(batch);
+    reviewCount = count;
+    zip.file(`${baseFolder}/人工复核列表.txt`, list);
   }
 
   const summaryReport = generateSummaryReport(batch, platformRule);
   zip.file(`${baseFolder}/处理总结.txt`, summaryReport);
 
   const content = await zip.generateAsync({ type: 'blob' });
-  downloadBlob(content, `${baseFolder}.zip`);
+  const filename = `${baseFolder}.zip`;
+  downloadBlob(content, filename);
+
+  return { filename, uploadCount, compressedCount, issueCount, reviewCount };
 }
 
 async function addImagesToFolder(
@@ -55,8 +141,9 @@ async function addImagesToFolder(
   platformRule: PlatformRule,
   compress: boolean,
   quality: number = 0.9,
-): Promise<void> {
+): Promise<number> {
   const grouped: Record<string, ImageItem[]> = {};
+  let added = 0;
 
   for (const img of images) {
     if (img.isDuplicate) continue;
@@ -86,14 +173,16 @@ async function addImagesToFolder(
             quality,
           );
           productFolder.file(filename, compressedBlob);
-        } else {
-          productFolder.file(filename, img.file);
+          added++;
+          continue;
         }
-      } else {
-        productFolder.file(filename, img.file);
       }
+      productFolder.file(filename, img.file);
+      added++;
     }
   }
+
+  return added;
 }
 
 function generateIssueReport(batch: ProcessBatch, platformRule: PlatformRule): Blob {
@@ -182,7 +271,7 @@ function generateIssueCsv(batch: ProcessBatch): string {
   return rows.join('\n');
 }
 
-function generateReviewList(batch: ProcessBatch): string {
+function generateReviewList(batch: ProcessBatch): { list: string; count: number } {
   const lines: string[] = [];
   lines.push('人工复核列表');
   lines.push(`生成时间: ${formatDate(Date.now())}`);
@@ -198,7 +287,7 @@ function generateReviewList(batch: ProcessBatch): string {
 
   if (borderCases.length === 0) {
     lines.push('暂无需要人工复核的图片');
-    return lines.join('\n');
+    return { list: lines.join('\n'), count: 0 };
   }
 
   lines.push(`共 ${borderCases.length} 张图片需要人工复核:`);
@@ -220,7 +309,7 @@ function generateReviewList(batch: ProcessBatch): string {
     lines.push('');
   }
 
-  return lines.join('\n');
+  return { list: lines.join('\n'), count: borderCases.length };
 }
 
 function generateSummaryReport(batch: ProcessBatch, platformRule: PlatformRule): string {

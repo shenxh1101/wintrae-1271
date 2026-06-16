@@ -1,102 +1,146 @@
-import { isImageFile } from '@/utils/filenameParser';
+import type { ImageRecord } from '@/types';
+
+declare global {
+  interface Window {
+    showDirectoryPicker?: (options?: { mode?: 'read' | 'readwrite' }) => Promise<any>;
+  }
+}
 
 export interface FileWithPath {
   file: File;
   path: string;
 }
 
-export async function selectFiles(): Promise<File[]> {
-  return new Promise((resolve, reject) => {
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff'];
+
+let savedDirectoryHandle: any = null;
+
+function isImageFile(filename: string): boolean {
+  const lowerName = filename.toLowerCase();
+  return IMAGE_EXTENSIONS.some((ext) => lowerName.endsWith(ext));
+}
+
+export async function selectFiles(): Promise<FileWithPath[]> {
+  return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.multiple = true;
     input.accept = 'image/*';
+    input.multiple = true;
 
-    input.onchange = (e) => {
-      const target = e.target as HTMLInputElement;
-      if (target.files) {
-        resolve(Array.from(target.files));
-      } else {
-        resolve([]);
+    input.onchange = () => {
+      const files: FileWithPath[] = [];
+      if (input.files) {
+        for (const file of Array.from(input.files)) {
+          if (isImageFile(file.name)) {
+            files.push({ file, path: file.name });
+          }
+        }
       }
+      resolve(files);
     };
 
-    input.onerror = () => reject(new Error('选择文件失败'));
+    input.oncancel = () => {
+      resolve([]);
+    };
+
     input.click();
   });
 }
 
 export async function selectFolder(): Promise<FileWithPath[]> {
   try {
-    if ('showDirectoryPicker' in window) {
-      const directoryHandle = await (window as any).showDirectoryPicker({
-        mode: 'read',
-      });
-
-      const files: FileWithPath[] = [];
-      await processDirectory(directoryHandle, '', files);
-      return files;
-    } else {
-      return await selectFilesLegacy();
+    if (typeof window.showDirectoryPicker === 'function') {
+      const handle = await window.showDirectoryPicker({ mode: 'read' });
+      savedDirectoryHandle = handle;
+      return await readDirectory(handle);
     }
-  } catch (error: any) {
-    if (error.name === 'AbortError') {
+
+    return selectFolderLegacy();
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
       return [];
     }
-    throw error;
+    return selectFolderLegacy();
   }
 }
 
-async function processDirectory(
-  directoryHandle: any,
-  path: string,
-  result: FileWithPath[],
-): Promise<void> {
-  for await (const [name, handle] of directoryHandle.entries()) {
-    const relativePath = path ? `${path}/${name}` : name;
+export function getSavedDirectoryHandle(): any {
+  return savedDirectoryHandle;
+}
 
-    if (handle.kind === 'file' && isImageFile(name)) {
-      try {
-        const file = await handle.getFile();
-        result.push({ file, path: relativePath });
-      } catch (e) {
-        // Skip files that can't be accessed
+export function clearSavedDirectoryHandle(): void {
+  savedDirectoryHandle = null;
+}
+
+async function readDirectory(
+  handle: any,
+  basePath = '',
+  files: FileWithPath[] = [],
+): Promise<FileWithPath[]> {
+  try {
+    for await (const [name, entry] of handle.entries()) {
+      const relativePath = basePath ? `${basePath}/${name}` : name;
+
+      if (entry.kind === 'file') {
+        if (isImageFile(name)) {
+          try {
+            const file = await entry.getFile();
+            files.push({ file, path: relativePath });
+          } catch (e) {
+            console.warn(`无法读取文件: ${relativePath}`, e);
+          }
+        }
+      } else if (entry.kind === 'directory') {
+        await readDirectory(entry, relativePath, files);
       }
-    } else if (handle.kind === 'directory') {
-      await processDirectory(handle, relativePath, result);
     }
+  } catch (e) {
+    console.warn('读取目录时出错:', e);
+  }
+
+  return files;
+}
+
+export async function reReadSavedDirectory(): Promise<FileWithPath[] | null> {
+  if (!savedDirectoryHandle) return null;
+  try {
+    return await readDirectory(savedDirectoryHandle);
+  } catch (e) {
+    console.warn('重新读取保存的目录失败，可能权限已失效:', e);
+    savedDirectoryHandle = null;
+    return null;
   }
 }
 
-async function selectFilesLegacy(): Promise<FileWithPath[]> {
-  return new Promise((resolve, reject) => {
+function selectFolderLegacy(): Promise<FileWithPath[]> {
+  return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.multiple = true;
-    input.accept = 'image/*';
     input.webkitdirectory = true;
+    (input as any).directory = '';
 
-    input.onchange = (e) => {
-      const target = e.target as HTMLInputElement;
-      if (target.files) {
-        const files: FileWithPath[] = Array.from(target.files)
-          .filter((file) => isImageFile(file.name))
-          .map((file) => ({
-            file,
-            path: (file as any).webkitRelativePath || file.name,
-          }));
-        resolve(files);
-      } else {
-        resolve([]);
+    input.onchange = () => {
+      const files: FileWithPath[] = [];
+      if (input.files) {
+        for (const file of Array.from(input.files)) {
+          if (isImageFile(file.name)) {
+            const path = (file as any).webkitRelativePath || file.name;
+            files.push({ file, path });
+          }
+        }
       }
+      resolve(files);
     };
 
-    input.onerror = () => reject(new Error('选择文件夹失败'));
+    input.oncancel = () => {
+      resolve([]);
+    };
+
     input.click();
   });
 }
 
-export function downloadBlob(blob: Blob, filename: string): void {
+export async function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -104,19 +148,10 @@ export function downloadBlob(blob: Blob, filename: string): void {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function readFileAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsText(file);
-  });
-}
-
-export function readFileAsDataURL(file: File): Promise<string> {
+export async function readFileAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
@@ -125,19 +160,43 @@ export function readFileAsDataURL(file: File): Promise<string> {
   });
 }
 
-export function getFileExtension(filename: string): string {
-  const lastDot = filename.lastIndexOf('.');
-  return lastDot === -1 ? '' : filename.slice(lastDot).toLowerCase();
+export async function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as ArrayBuffer);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(file);
+  });
 }
 
-export function validateFileSize(file: File, maxSize: number): boolean {
-  return file.size <= maxSize;
-}
-
-export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+export function convertToImageRecord(img: {
+  id: string;
+  originalName: string;
+  newName: string;
+  productCode: string;
+  imageType: 'main' | 'detail' | 'scene' | 'unknown';
+  angle: string;
+  width: number;
+  height: number;
+  fileSize: number;
+  whiteBackgroundRatio: number;
+  isDuplicate: boolean;
+  status: 'pending' | 'processing' | 'completed' | 'error';
+  issues: any[];
+}): ImageRecord {
+  return {
+    id: img.id,
+    originalName: img.originalName,
+    newName: img.newName,
+    productCode: img.productCode,
+    imageType: img.imageType,
+    angle: img.angle,
+    width: img.width,
+    height: img.height,
+    fileSize: img.fileSize,
+    whiteBackgroundRatio: img.whiteBackgroundRatio,
+    isDuplicate: img.isDuplicate,
+    status: img.status,
+    issues: img.issues,
+  };
 }

@@ -18,6 +18,7 @@ interface AppState {
   setExportConfig: (config: Partial<ExportConfig>) => void;
   setCustomSkuPattern: (pattern: string) => void;
   addProcessRecord: (record: ProcessRecord) => void;
+  updateProcessRecord: (id: string, updates: Partial<ProcessRecord>) => void;
   setProcessRecords: (records: ProcessRecord[]) => void;
   getPlatformRule: (id: string) => PlatformRule | undefined;
 }
@@ -80,6 +81,14 @@ export const useAppStore = create<AppState>()(
       addProcessRecord: (record) => {
         set((state) => ({
           processRecords: [record, ...state.processRecords].slice(0, 100),
+        }));
+      },
+
+      updateProcessRecord: (id, updates) => {
+        set((state) => ({
+          processRecords: state.processRecords.map((record) =>
+            record.id === id ? { ...record, ...updates } : record,
+          ),
         }));
       },
 

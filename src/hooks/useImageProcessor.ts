@@ -2,13 +2,13 @@ import { useCallback } from 'react';
 import { useAppStore } from '@/store/appStore';
 import { useProcessStore } from '@/store/processStore';
 import { processImageFile, validateImage, groupImagesByProduct, addMissingAngleIssues, refineImageType, generateSequentialNames } from '@/services/imageService';
-import { selectFiles, selectFolder, FileWithPath } from '@/services/fileService';
+import { selectFiles, selectFolder, FileWithPath, convertToImageRecord } from '@/services/fileService';
 import { exportResults } from '@/services/exportService';
 import type { ImageItem } from '@/types';
 import { generateId } from '@/utils/formatters';
 
 export function useImageProcessor() {
-  const { selectedPlatformId, customSkuPattern, exportConfig, getPlatformRule, addProcessRecord } = useAppStore();
+  const { selectedPlatformId, customSkuPattern, exportConfig, getPlatformRule, addProcessRecord, updateProcessRecord } = useAppStore();
   const {
     currentBatch,
     isProcessing,
@@ -38,7 +38,7 @@ export function useImageProcessor() {
     const files = await selectFiles();
     if (files.length === 0) return;
 
-    await processFiles(files.map((file) => ({ file, path: file.name })), platformRule);
+    await processFiles(files, platformRule);
   }, [selectedPlatformId, getPlatformRule]);
 
   const handleSelectFolder = useCallback(async () => {
@@ -128,6 +128,8 @@ export function useImageProcessor() {
         status: 'completed',
         startTime: Date.now(),
         endTime: Date.now(),
+        images: imagesWithAngleIssues.map(convertToImageRecord),
+        groups: productGroups,
       });
 
       setProgress(100, '处理完成');
@@ -145,15 +147,27 @@ export function useImageProcessor() {
     setProgress(0, '正在生成导出文件...');
 
     try {
-      await exportResults(currentBatch, platformRule, exportConfig);
+      const result = await exportResults(currentBatch, platformRule, exportConfig);
       setProgress(100, '导出完成');
+
+      if (result) {
+        updateProcessRecord(currentBatch.id, {
+          exportContent: {
+            uploadFileCount: result.uploadCount,
+            compressedFileCount: result.compressedCount,
+            issueFileCount: result.issueCount,
+            reviewFileCount: result.reviewCount,
+          },
+          reportPath: result.filename,
+        });
+      }
     } catch (error) {
       console.error('导出失败:', error);
       alert('导出失败，请重试');
     } finally {
       setIsProcessing(false);
     }
-  }, [currentBatch, selectedPlatformId, getPlatformRule, exportConfig, setIsProcessing, setProgress]);
+  }, [currentBatch, selectedPlatformId, getPlatformRule, exportConfig, setIsProcessing, setProgress, updateProcessRecord]);
 
   const handleReset = useCallback(() => {
     if (isProcessing) {

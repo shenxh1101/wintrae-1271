@@ -8,6 +8,7 @@ import { ProcessingOverlay } from '@/components/processor/ProcessingOverlay';
 import { IssueSummary } from '@/components/processor/IssueSummary';
 import { ProductGroups } from '@/components/processor/ProductGroups';
 import { ImageCard } from '@/components/processor/ImageCard';
+import { ExportPreviewModal } from '@/components/processor/ExportPreviewModal';
 import { useImageProcessor } from '@/hooks/useImageProcessor';
 import { useProcessStore } from '@/store/processStore';
 import { useAppStore } from '@/store/appStore';
@@ -41,11 +42,11 @@ export default function ImageProcessor() {
     removeImage,
   } = useProcessStore();
 
-  const { selectedPlatformId, platformRules, exportConfig, setExportConfig } = useAppStore();
+  const { selectedPlatformId, platformRules } = useAppStore();
   const { isWatching, startWatching, stopWatching, checkForNewFiles } = useFileWatcher();
 
   const [showProductGroups, setShowProductGroups] = useState(true);
-  const [showExportOptions, setShowExportOptions] = useState(false);
+  const [showExportPreview, setShowExportPreview] = useState(false);
 
   const selectedPlatform = platformRules.find((p) => p.id === selectedPlatformId);
   const filteredImages = getFilteredImages();
@@ -207,55 +208,10 @@ export default function ImageProcessor() {
                     <RotateCcw className="w-4 h-4 mr-1" />
                     重置
                   </Button>
-                  <div className="relative">
-                    <Button size="sm" onClick={() => setShowExportOptions(!showExportOptions)} disabled={isProcessing}>
-                      <Download className="w-4 h-4 mr-1" />
-                      导出结果
-                    </Button>
-                    {showExportOptions && (
-                      <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 p-4 z-20">
-                        <h4 className="font-medium text-gray-900 mb-3">导出选项</h4>
-                        <div className="space-y-2">
-                          {[
-                            { key: 'generateUploadFolder', label: '生成待上传文件夹' },
-                            { key: 'generateCompressed', label: '生成压缩副本' },
-                            { key: 'generateIssueReport', label: '生成问题报告' },
-                            { key: 'generateReviewList', label: '生成人工复核列表' },
-                          ].map((item) => (
-                            <label key={item.key} className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={exportConfig[item.key as keyof typeof exportConfig] as boolean}
-                                onChange={(e) => setExportConfig({ [item.key]: e.target.checked })}
-                                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                              />
-                              <span className="text-sm text-gray-700">{item.label}</span>
-                            </label>
-                          ))}
-                          <div className="pt-2">
-                            <label className="block text-xs text-gray-500 mb-1">
-                              压缩质量: {Math.round(exportConfig.compressionQuality * 100)}%
-                            </label>
-                            <input
-                              type="range"
-                              min="0.5"
-                              max="1"
-                              step="0.05"
-                              value={exportConfig.compressionQuality}
-                              onChange={(e) => setExportConfig({ compressionQuality: parseFloat(e.target.value) })}
-                              className="w-full"
-                            />
-                          </div>
-                        </div>
-                        <div className="mt-4 pt-3 border-t border-gray-100">
-                          <Button size="sm" className="w-full" onClick={handleExport} disabled={isProcessing}>
-                            <Download className="w-4 h-4 mr-1" />
-                            开始导出
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <Button size="sm" onClick={() => setShowExportPreview(true)} disabled={isProcessing}>
+                    <Download className="w-4 h-4 mr-1" />
+                    导出结果
+                  </Button>
                 </div>
               </div>
             </div>
@@ -292,6 +248,10 @@ export default function ImageProcessor() {
         )}
 
         <ProcessingOverlay />
+        <ExportPreviewModal
+          isOpen={showExportPreview}
+          onClose={() => setShowExportPreview(false)}
+        />
       </div>
     </AppLayout>
   );
